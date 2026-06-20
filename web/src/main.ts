@@ -1,6 +1,8 @@
 import { SignalingClient } from "./signaling.js";
 import { PeerConnectionManager, ConnectionState } from "./peer.js";
 import { sendFile, FileReceiver, triggerDownload } from "./transfer.js";
+import QRCode from "qrcode";
+import { Html5Qrcode } from "html5-qrcode";
 
 // DOM Elements
 const lobbySection = document.getElementById("lobby-section")!;
@@ -35,11 +37,23 @@ const progressBytes = document.getElementById("progress-bytes")!;
 const peersSection = document.getElementById("peers-section")!;
 const peersList = document.getElementById("peers-list")!;
 
+const showQrBtn = document.getElementById("show-qr-btn") as HTMLButtonElement;
+const scanQrBtn = document.getElementById("scan-qr-btn") as HTMLButtonElement;
+const qrModal = document.getElementById("qr-modal")!;
+const scannerModal = document.getElementById("scanner-modal")!;
+const qrImage = document.getElementById("qr-image") as HTMLImageElement;
+const qrModalCode = document.getElementById("qr-modal-code")!;
+const closeQrBtn = document.getElementById("close-qr-btn") as HTMLButtonElement;
+const closeScannerBtn = document.getElementById("close-scanner-btn") as HTMLButtonElement;
+const scannerError = document.getElementById("scanner-error")!;
+
 // State variables
 let role: "host" | "guest" | null = null;
 let currentFile: File | null = null;
 let receiver: FileReceiver | null = null;
 let guestTransferStartTime: number | null = null;
+let html5QrCode: Html5Qrcode | null = null;
+let scannerActive = false;
 
 // Track active guests (only used when role === "host")
 interface GuestInfo {
@@ -197,6 +211,37 @@ function updateSenderUI(): void {
   }
 }
 
+// Helper functions for QR and scanning
+function parseRoomCodeFromUrlOrString(input: string): string | null {
+  try {
+    const url = new URL(input);
+    const params = new URLSearchParams(url.search);
+    const room = params.get("room");
+    if (room) return room.trim();
+  } catch (e) {
+    // Not a URL
+  }
+  
+  const clean = input.trim();
+  if (clean.split("-").length === 3) {
+    return clean;
+  }
+  return null;
+}
+
+function stopScanner(): Promise<void> {
+  if (html5QrCode && scannerActive) {
+    scannerActive = false;
+    return html5QrCode.stop().then(() => {
+      html5QrCode = null;
+    }).catch(err => {
+      console.error("Failed to stop scanner", err);
+      html5QrCode = null;
+    });
+  }
+  return Promise.resolve();
+}
+
 // Reset UI state to lobby
 function resetToLobby(): void {
   role = null;
@@ -206,6 +251,11 @@ function resetToLobby(): void {
   fileInput.value = "";
   fileDetails.textContent = "Click to browse your files";
   sendFileBtn.disabled = true;
+
+  // Close any active modals and stop scanner
+  qrModal.classList.remove("active");
+  scannerModal.classList.remove("active");
+  stopScanner();
 
   lobbySection.classList.add("active");
   roomSection.classList.remove("active");
@@ -287,9 +337,7 @@ leaveRoomBtn.addEventListener("click", () => {
 });
 
 // File picker interactions
-filePickerZone.addEventListener("click", () => {
-  fileInput.click();
-});
+
 
 fileInput.addEventListener("change", () => {
   if (fileInput.files && fileInput.files.length > 0) {
@@ -340,6 +388,7 @@ sendFileBtn.addEventListener("click", () => {
 
 // Signaling connection callbacks
 signaling.onJoined = (data) => {
+  peerManager.handleJoined(data.self, data.role);
   role = data.role;
   roomCodeText.textContent = data.room;
   lobbySection.classList.remove("active");
@@ -359,11 +408,13 @@ signaling.onJoined = (data) => {
   updateStatusBadge("waiting", "Waiting for peers...");
 };
 
-signaling.onPeerJoined = () => {
+signaling.onPeerJoined = (peerId) => {
+  peerManager.handlePeerJoined(peerId);
   updateStatusBadge("connecting", "Peer joining, connecting...");
 };
 
 signaling.onPeerLeft = (peerId) => {
+  peerManager.handlePeerLeft(peerId);
   if (role === "host") {
     activeGuests.delete(peerId);
     renderPeersList();
@@ -494,6 +545,76 @@ peerManager.onDataChannel = (peerId, channel) => {
     };
   }
 };
+
+// QR Code Show Action
+showQrBtn.addEventListener("click", () => {
+  const code = roomCodeText.textContent || "";
+  if (code && code !== "...") {
+    const shareUrl = `${window.location.origin}${window.location.pathname}?room=${code}`;
+    QRCode.toDataURL(shareUrl, { width: 400, margin: 2 })
+      .then(url => {
+        qrImage.src = url;
+        qrModalCode.textContent = code;
+        qrModal.classList.add("active");
+      })
+      .catch(err => {
+        console.error("Failed to generate QR Code", err);
+        showError("Failed to generate QR Code.");
+      });
+  }
+});
+
+// Close QR Modal Action
+closeQrBtn.addEventListener("click", () => {
+  qrModal.classList.remove("active");
+});
+
+// QR Code Scanner Action
+scanQrBtn.addEventListener("click", () => {
+  clearError();
+  scannerError.style.display = "none";
+  scannerModal.classList.add("active");
+
+  html5QrCode = new Html5Qrcode("scanner-preview");
+  scannerActive = true;
+  html5QrCode.start(
+    { facingMode: "environment" },
+    {
+      fps: 10,
+      qrbox: { width: 220, height: 220 }
+    },
+    (decodedText) => {
+      const code = parseRoomCodeFromUrlOrString(decodedText);
+      if (code) {
+        stopScanner().then(() => {
+          scannerModal.classList.remove("active");
+          joinRoomInput.value = code;
+          // Connect to the room automatically
+          clearError();
+          signaling.onOpen = () => {
+            signaling.joinRoom(code);
+          };
+          signaling.connect();
+        });
+      }
+    },
+    () => {
+      // Silent error handler (called for every frame scanned without QR code)
+    }
+  ).catch(err => {
+    console.error("Failed to start QR scanner", err);
+    scannerError.textContent = "Could not access camera. Please check permissions.";
+    scannerError.style.display = "block";
+    scannerActive = false;
+  });
+});
+
+// Close Scanner Action
+closeScannerBtn.addEventListener("click", () => {
+  stopScanner().then(() => {
+    scannerModal.classList.remove("active");
+  });
+});
 
 // Check if a room code is passed in the URL query parameter on page load
 window.addEventListener("DOMContentLoaded", () => {

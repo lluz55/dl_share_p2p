@@ -30,7 +30,7 @@
             pname = "p2pshare-frontend";
             version = "0.1.0";
             src = ./web;
-            npmDepsHash = "sha256-7ZeVNttRm/lAOwb75iOfLZWPgHFVk+8eU6ch0W6jRGw=";
+            npmDepsHash = "sha256-gpvYADnavsD4WoySZT3MRzRzBIzs9Peo8SRt97OTwq4=";
 
             # Node version supporting experimental strip types
             nodejs = pkgs.nodejs;
@@ -46,7 +46,26 @@
           };
 
           frontend-serve = pkgs.writeShellScriptBin "p2pshare-frontend-serve" ''
-            exec ${pkgs.nodejs}/bin/npx --yes http-server "${frontend}" "$@"
+            TEMP_DIR=$(mktemp -d)
+            trap 'rm -rf "$TEMP_DIR"' EXIT
+
+            cp -r "${frontend}"/* "$TEMP_DIR/"
+            chmod -R +w "$TEMP_DIR"
+
+            if [ -n "$SIGNALING_URL" ]; then
+              echo "Injecting runtime SIGNALING_URL=$SIGNALING_URL into index.html..."
+              ${pkgs.nodejs}/bin/node -e "
+                const fs = require('fs');
+                const file = process.argv[1];
+                const url = process.argv[2];
+                let html = fs.readFileSync(file, 'utf8');
+                const injection = '<script>window.__SIGNALING_URL__ = \"' + url + '\";</script>';
+                html = html.replace('<script src=\"dist/bundle.js\"></script>', injection + '<script src=\"dist/bundle.js\"></script>');
+                fs.writeFileSync(file, html, 'utf8');
+              " "$TEMP_DIR/index.html" "$SIGNALING_URL"
+            fi
+
+            exec ${pkgs.nodejs}/bin/npx --yes http-server "$TEMP_DIR" "$@"
           '';
 
           frontend-build = pkgs.writeShellScriptBin "p2pshare-frontend-build" ''

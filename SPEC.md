@@ -263,7 +263,7 @@ A phase's work MUST NOT begin pulling in deferred items from later phases withou
 
 ## 11. Open questions (resolve before the dependent code is written)
 
-1. **Word list.** Source and size of the three-word vocabulary (defines key space), and whether to add a per-IP rate limit on join attempts specifically.
+1. **Word list.** (RESOLVED 2026-06-20) Resolved to use 160 Portuguese ASCII-only lowercase words (entropy: 160^3 = 4,096,000 combinations). Join rate limiting is enforced via IP connection caps and per-connection message limits.
 
 ---
 
@@ -280,5 +280,6 @@ A phase's work MUST NOT begin pulling in deferred items from later phases withou
 
 ## 13. Changelog
 
+- **2026-06-20** — Resolved word list source and size (§11.3) to use 160 Portuguese ASCII-only lowercase words.
 - **2026-06-20** — Resolved relay authentication mechanism (§11.1) and limits (§11.2); updated §4.3.
 - **2026-06-20** — Initial specification consolidated from planning sessions.

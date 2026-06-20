@@ -28,24 +28,29 @@ type Room struct {
 }
 
 // Word list for generating room codes.
-// TODO(SPEC §11.3): finalize the word list source and size to ensure sufficient entropy.
+// Resolved SPEC §11.3: using 160 Portuguese ASCII-only lowercase words.
 var wordList = []string{
-	"amber", "ancient", "anchor", "arrow", "autumn", "badge", "beacon", "bison", "blaze", "breeze",
-	"bright", "bronze", "canyon", "castle", "cedar", "cherry", "cliff", "cobalt", "comet", "copper",
-	"cosmic", "crag", "crater", "crest", "crystal", "desert", "dolphin", "dusk", "eagle", "earth",
-	"echo", "ember", "falcon", "fawn", "feather", "flame", "forest", "fossil", "frost", "galaxy",
-	"garden", "geyser", "glacier", "glow", "gold", "granite", "gravel", "harbor", "haven", "hawk",
-	"hazel", "heather", "heron", "hill", "honey", "horizon", "island", "ivy", "jade", "jasper",
-	"jungle", "lake", "leaf", "lemon", "lime", "lizard", "lunar", "maple", "meadow", "mirror",
-	"mist", "moss", "mount", "nebula", "novel", "oak", "oasis", "ocean", "olive", "opal",
-	"orbit", "orchid", "otter", "owl", "ozone", "panther", "pebble", "pine", "pioneer", "planet",
-	"plum", "pond", "prism", "quartz", "radar", "rain", "rapid", "raven", "reef", "riddle",
-	"river", "ruby", "rust", "sable", "safari", "salmon", "scale", "sea", "seeker", "shadow",
-	"shield", "shore", "silent", "silver", "sky", "slate", "snow", "solar", "sonic", "spark",
-	"spire", "spring", "spruce", "star", "stone", "storm", "summit", "sun", "swift", "tiger",
-	"timber", "topaz", "trail", "tundra", "valley", "velvet", "vessel", "vibrant", "vine", "violet",
-	"volcano", "vortex", "voyager", "walnut", "wave", "weaver", "wild", "wind", "wolf", "zenith",
-	"zephyr",
+	"abacate", "abacaxi", "abelha", "abobora", "acacia", "alecrim", "alface", "altura", "alvorada", "ametista",
+	"amora", "ancora", "antigo", "areia", "arvore", "asfalto", "astro", "atomo", "avental", "azul",
+	"bambu", "banana", "barco", "batata", "baunilha", "beijo", "bisonte", "brisa", "bronze", "cacto",
+	"cadeira", "calor", "camelo", "caminho", "campina", "canela", "canyon", "capim", "carvalho", "castelo",
+	"caverna", "cedro", "cenoura", "cereja", "claro", "cobalto", "colina", "cometa", "concha", "cobre",
+	"coral", "cosmos", "cratera", "cristal", "crista", "deserto", "diamante", "doce", "dourado", "duna",
+	"eco", "eclipse", "elo", "esmeralda", "espelho", "espinho", "espiral", "esquilo", "estacao", "esteira",
+	"estrela", "falcao", "farol", "ferro", "floresta", "fogo", "folha", "fonte", "fossil", "framboesa",
+	"frio", "fruta", "fumaca", "galaxia", "galho", "garoa", "gato", "girassol", "glacial", "globo",
+	"granito", "graveto", "guarda", "harpa", "horizonte", "hortelao", "iogurte", "ilha", "jade", "jasmim",
+	"jaspe", "jornada", "juba", "lago", "lagoa", "laranja", "luz", "limao", "linha", "lince",
+	"lirio", "lontra", "lua", "lunar", "macieira", "madeira", "manga", "manto", "mapa", "mar",
+	"marfim", "marmore", "mel", "melancia", "menta", "mergulho", "miragem", "mistura", "mochila", "moeda",
+	"montanha", "morango", "musgo", "nebula", "neve", "ninho", "noite", "nova", "nuvem", "oasis",
+	"oceano", "oliva", "onda", "palmeira", "pantano", "papel", "passaro", "pedra", "pena", "pepino",
+	"perola", "pessego", "piano", "pinheiro", "pioneiro", "pipoca", "pirata", "planeta", "pluma", "poeira",
+	"pomar", "ponte", "prata", "prisma", "quartzo", "radar", "raio", "raiz", "rampa", "raposa",
+	"recife", "relogio", "rio", "rocha", "rosa", "rubi", "sabao", "safira", "salmao", "semente",
+	"senda", "serra", "silencio", "sol", "sombra", "sopro", "tangerina", "teia", "terra", "tijolo",
+	"tigre", "trilha", "trigo", "tundra", "turquesa", "vale", "veludo", "vento", "verde", "vereda",
+	"viagem", "violeta", "vulcao", "xisto",
 }
 
 // GenerateRoomCode generates a three-word code joined by hyphens.

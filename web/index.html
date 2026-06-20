@@ -362,6 +362,122 @@
       font-size: 0.8rem;
       color: var(--text-secondary);
     }
+
+    /* Modal Styles */
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.7);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      z-index: 1000;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .modal-overlay.active {
+      opacity: 1;
+      pointer-events: all;
+    }
+
+    .modal-container {
+      width: 90%;
+      max-width: 400px;
+      background: rgba(21, 16, 42, 0.95);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 24px;
+      padding: 30px;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6), 0 0 40px rgba(124, 58, 237, 0.15);
+      text-align: center;
+      transform: scale(0.9);
+      transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      box-sizing: border-box;
+    }
+
+    .modal-overlay.active .modal-container {
+      transform: scale(1);
+    }
+
+    .modal-title {
+      font-size: 1.4rem;
+      font-weight: 600;
+      margin-bottom: 12px;
+      background: linear-gradient(to right, #ffffff, #c084fc);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      letter-spacing: -0.01em;
+    }
+
+    .modal-close {
+      margin-top: 20px;
+    }
+
+    /* QR Code styles */
+    .qr-container {
+      background: #ffffff;
+      padding: 16px;
+      border-radius: 16px;
+      display: inline-block;
+      margin: 15px auto;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.3), 0 0 20px rgba(124, 58, 237, 0.2);
+    }
+
+    .qr-container img {
+      display: block;
+      width: 200px;
+      height: 200px;
+    }
+
+    /* Scanner styles */
+    .scanner-wrapper {
+      position: relative;
+      width: 280px;
+      height: 280px;
+      margin: 15px auto;
+      border-radius: 20px;
+      overflow: hidden;
+      border: 2px solid rgba(124, 58, 237, 0.5);
+      box-shadow: 0 0 20px rgba(124, 58, 237, 0.2);
+      background: #000;
+    }
+
+    #scanner-preview {
+      width: 100% !important;
+      height: 100% !important;
+    }
+
+    /* Override html5-qrcode video styling to fit nicely */
+    #scanner-preview video {
+      object-fit: cover !important;
+      width: 100% !important;
+      height: 100% !important;
+    }
+
+    .scanner-laser {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 3px;
+      background: linear-gradient(to right, rgba(167, 139, 250, 0), #a78bfa, rgba(167, 139, 250, 0));
+      box-shadow: 0 0 12px 3px #7c3aed;
+      animation: scan 2s linear infinite;
+      z-index: 5;
+      pointer-events: none;
+    }
+
+    @keyframes scan {
+      0% { top: 0%; }
+      50% { top: 100%; }
+      100% { top: 0%; }
+    }
   </style>
   <!--
     To override the signaling URL at deploy time, insert window.__SIGNALING_URL__ here:
@@ -393,6 +509,10 @@
       <button id="join-room-btn" class="btn btn-secondary">
         Join Room
       </button>
+      <button id="scan-qr-btn" class="btn btn-secondary" style="margin-top: 12px; display: flex; gap: 8px; justify-content: center; align-items: center; width: 100%;">
+        <svg style="width: 20px; height: 20px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+        Scan QR Code
+      </button>
     </div>
 
     <!-- Room Section (Connected state & file transfers) -->
@@ -400,12 +520,16 @@
       <div class="room-code-container">
         <div class="room-code-label">Room Access Code</div>
         <div id="room-code-text" class="room-code-value">...</div>
-        <div style="display: flex; gap: 10px; justify-content: center;">
-          <button id="copy-code-btn" class="btn btn-secondary" style="margin: 0; padding: 8px 16px; font-size: 0.85rem; width: auto; display: inline-flex;">
+        <div style="display: flex; gap: 8px; justify-content: center; flex-wrap: wrap;">
+          <button id="copy-code-btn" class="btn btn-secondary" style="margin: 0; padding: 8px 16px; font-size: 0.85rem; width: auto; display: inline-flex; align-items: center; gap: 6px;">
             Copy Code
           </button>
-          <button id="copy-link-btn" class="btn btn-secondary" style="margin: 0; padding: 8px 16px; font-size: 0.85rem; width: auto; display: inline-flex;">
+          <button id="copy-link-btn" class="btn btn-secondary" style="margin: 0; padding: 8px 16px; font-size: 0.85rem; width: auto; display: inline-flex; align-items: center; gap: 6px;">
             Copy Link
+          </button>
+          <button id="show-qr-btn" class="btn btn-secondary" style="margin: 0; padding: 8px 16px; font-size: 0.85rem; width: auto; display: inline-flex; align-items: center; gap: 6px;">
+            <svg style="width: 16px; height: 16px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+            Show QR
           </button>
         </div>
       </div>
@@ -425,11 +549,11 @@
 
       <!-- Sender Flow (only active when connected and host) -->
       <div id="sender-flow" style="display: none;">
-        <input type="file" id="file-input" style="display: none;" />
-        <div id="file-picker-zone" class="file-dropzone">
+        <label id="file-picker-zone" class="file-dropzone" style="display: block; cursor: pointer;">
+          <input type="file" id="file-input" style="position: absolute; left: -9999px; top: -9999px;" />
           <div class="file-dropzone-title">Choose a file to share</div>
           <div id="file-details" class="file-dropzone-subtitle">Click to browse your files</div>
-        </div>
+        </label>
         <button id="send-file-btn" class="btn btn-primary" disabled>
           Send File
         </button>
@@ -457,6 +581,33 @@
       <button id="leave-room-btn" class="btn btn-secondary">
         Leave Room
       </button>
+    </div>
+  </div>
+
+  <!-- QR Code Modal -->
+  <div id="qr-modal" class="modal-overlay">
+    <div class="modal-container">
+      <div class="modal-title">Room QR Code</div>
+      <div class="subtitle" style="margin-bottom: 20px;">Scan to join this room from another device</div>
+      <div class="qr-container">
+        <img id="qr-image" src="" alt="QR Code" />
+      </div>
+      <div id="qr-modal-code" style="font-weight: 600; margin-top: 15px; color: #c084fc; font-size: 1.1rem; letter-spacing: 0.05em;"></div>
+      <button id="close-qr-btn" class="btn btn-primary modal-close" style="width: 100%;">Close</button>
+    </div>
+  </div>
+
+  <!-- Scanner Modal -->
+  <div id="scanner-modal" class="modal-overlay">
+    <div class="modal-container">
+      <div class="modal-title">Scan QR Code</div>
+      <div class="subtitle">Position the QR code inside the frame</div>
+      <div class="scanner-wrapper">
+        <div id="scanner-preview"></div>
+        <div class="scanner-laser"></div>
+      </div>
+      <div id="scanner-error" class="subtitle" style="color: var(--error-color); margin-top: 10px; display: none;"></div>
+      <button id="close-scanner-btn" class="btn btn-secondary modal-close" style="width: 100%;">Cancel</button>
     </div>
   </div>
 

@@ -18,23 +18,25 @@ export class PeerConnectionManager {
     this.setupSignalingListeners();
   }
 
+  /** Called by main.ts when the joined message arrives (role + selfId setup). */
+  public handleJoined(selfId: string, role: "host" | "guest"): void {
+    this.selfId = selfId;
+    this.role = role;
+  }
+
+  /** Called by main.ts when a peer joins. Host initiates WebRTC. */
+  public handlePeerJoined(peerId: string): void {
+    if (this.role === "host") {
+      void this.initiateConnection(peerId);
+    }
+  }
+
+  /** Called by main.ts when a peer leaves. */
+  public handlePeerLeft(peerId: string): void {
+    this.closeConnection(peerId);
+  }
+
   private setupSignalingListeners(): void {
-    this.signaling.onJoined = (data) => {
-      this.selfId = data.self;
-      this.role = data.role;
-    };
-
-    this.signaling.onPeerJoined = (peerId) => {
-      // Host is responsible for initiating the WebRTC peer connection and data channel
-      if (this.role === "host") {
-        void this.initiateConnection(peerId);
-      }
-    };
-
-    this.signaling.onPeerLeft = (peerId) => {
-      this.closeConnection(peerId);
-    };
-
     this.signaling.onOffer = async (fromId, sdp) => {
       try {
         let pc = this.connections.get(fromId);
