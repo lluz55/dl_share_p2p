@@ -1,0 +1,27 @@
+[Unit]
+Description=P2P Share Go Signaling Server
+After=network.target
+
+[Service]
+Type=simple
+User=p2pshare
+Group=p2pshare
+WorkingDirectory=/var/lib/p2pshare
+Environment="ALLOWED_ORIGINS=https://your-frontend.pages.dev"
+ExecStart=/usr/local/bin/p2pshare-server -port 8080
+Restart=on-failure
+RestartSec=5s
+
+# Security Hardening (SPEC §6.6 Process hygiene)
+ProtectSystem=strict
+ProtectHome=true
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+DeviceAllow=/dev/null r
+DeviceAllow=/dev/urandom r
+
+[Install]
+WantedBy=multi-user.target
