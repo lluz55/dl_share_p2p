@@ -77,7 +77,12 @@ Every safeguard required by Phase 1 has been implemented and verified as follows
 
 ## 3. Phase-1 Exit Statement
 
-- **Phase 1 scoping**: Verified that all Phase 1 tasks (01 to 08) are complete and operational. No Phase 2, 3, or 4 work has leaked in.
-- **Relay status**: No WebSocket data relay logic or code has been written (`server/relay.go` does NOT exist, matching SPEC §3.1 and §10).
+- **Phase 1 scoping at verification time**: Verified that all Phase 1 tasks (01
+  to 08) were complete and operational before later-phase work began.
+- **Relay status at Phase 1 verification time**: No WebSocket data relay logic or
+  code had been written (`server/relay.go` did NOT exist at that point, matching
+  SPEC §3.1 and §10 before Phase 4 began).
 - **Terminology check**: The word "turn"/"TURN" is not used anywhere in code identifiers, variables, or comments referencing the data relay.
-- **Open questions**: SPEC §11.1 (relay auth) and §11.2 (relay limits) remain open and unresolved, confirming that data relay logic is blocked.
+- **Open questions at verification time**: SPEC §11.1 (relay auth) and §11.2
+  (relay limits) were still open and unresolved, confirming that data relay logic
+  was blocked at Phase 1 exit.

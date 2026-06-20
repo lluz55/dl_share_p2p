@@ -40,7 +40,7 @@
 | 11 | [flake.nix packaging](11-phase3-flake-packaging.md) | 3 | 08 | Done |
 | 12 | [Deployment: tunnel + static host](12-phase3-deployment.md) | 3 | 11 | Done |
 | 13 | [Resolve relay auth open question](13-phase4-relay-auth-decision.md) | 4 | 08 | Done |
-| 14 | [Go data relay (fallback)](14-phase4-data-relay.md) | 4 | 13 | Blocked |
+| 14 | [Go data relay (fallback)](14-phase4-data-relay.md) | 4 | 13 | In Progress |
 
 ### Dependency graph
 
@@ -56,5 +56,5 @@
 
 - **Phase 1** (tasks 01–08): core transport + essential safeguards. Current scope.
 - **Phase 2** (09–10), **Phase 3** (11–12): start only after Phase 1 is Done.
-- **Phase 4** (13–14): conditional. Task 14 is BLOCKED until task 13 resolves
-  SPEC §11.1 and the SPEC is updated. Do not write relay code before then.
+- **Phase 4** (13–14): conditional. Task 14 may proceed only after task 13
+  resolves SPEC §11.1 and the SPEC is updated.

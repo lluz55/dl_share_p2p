@@ -1,8 +1,7 @@
 # Task 14 — Go data relay (fallback)
 
 - **Phase:** 4 (conditional)
-- **Status:** BLOCKED — do not start until task 13 resolves SPEC §11.1/§11.2 and
-  SPEC.md is updated.
+- **Status:** In Progress
 - **Depends on:** 13
 - **SPEC references:** §3.1, §4.3, §6, §9, §10 (Phase 4), §11.1, §11.2
 
