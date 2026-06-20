@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>P2P Share — E2E Encrypted File Transfer</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
+
+    :root {
+      --bg-gradient: linear-gradient(135deg, #0b0c16 0%, #15102a 50%, #0d0614 100%);
+      --panel-bg: rgba(255, 255, 255, 0.03);
+      --panel-border: rgba(255, 255, 255, 0.08);
+      --text-primary: #ffffff;
+      --text-secondary: #9ca3af;
+      --accent-glow: #8b5cf6;
+      --accent-gradient: linear-gradient(135deg, #a78bfa 0%, #7c3aed 100%);
+      --success-color: #10b981;
+      --error-color: #ef4444;
+      --warning-color: #f59e0b;
+      --info-color: #3b82f6;
+    }
+
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: 'Outfit', sans-serif;
+      background: var(--bg-gradient);
+      color: var(--text-primary);
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      overflow-x: hidden;
+      position: relative;
+    }
+
+    .blob {
+      position: absolute;
+      width: 600px;
+      height: 600px;
+      background: radial-gradient(circle, rgba(124, 58, 237, 0.12) 0%, rgba(0,0,0,0) 70%);
+      border-radius: 50%;
+      z-index: -1;
+      pointer-events: none;
+    }
+    .blob-1 { top: -150px; left: -150px; }
+    .blob-2 { bottom: -150px; right: -150px; }
+
+    .app-container {
+      width: 90%;
+      max-width: 480px;
+      background: var(--panel-bg);
+      border: 1px solid var(--panel-border);
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
+      border-radius: 24px;
+      padding: 40px;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+      box-sizing: border-box;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 30px;
+    }
+
+    h1 {
+      font-size: 2.2rem;
+      font-weight: 700;
+      margin: 0 0 8px 0;
+      background: linear-gradient(to right, #ffffff, #c084fc);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      letter-spacing: -0.02em;
+    }
+
+    .subtitle {
+      color: var(--text-secondary);
+      font-size: 0.95rem;
+      font-weight: 300;
+    }
+
+    /* Sections */
+    .section {
+      display: none;
+      animation: fadeIn 0.4s ease forwards;
+    }
+
+    .section.active {
+      display: block;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Card buttons & inputs */
+    .btn {
+      width: 100%;
+      padding: 14px 20px;
+      border-radius: 12px;
+      border: none;
+      font-weight: 600;
+      font-size: 1rem;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      font-family: inherit;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 8px;
+      box-sizing: border-box;
+    }
+
+    .btn-primary {
+      background: var(--accent-gradient);
+      color: #fff;
+      box-shadow: 0 0 20px rgba(124, 58, 237, 0.25);
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 0 30px rgba(124, 58, 237, 0.45);
+    }
+
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.04);
+      color: #fff;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      margin-top: 12px;
+    }
+
+    .btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    .divider {
+      display: flex;
+      align-items: center;
+      text-align: center;
+      color: var(--text-secondary);
+      margin: 25px 0;
+      font-size: 0.85rem;
+      font-weight: 500;
+    }
+
+    .divider::before, .divider::after {
+      content: '';
+      flex: 1;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .divider:not(:empty)::before { margin-right: .75em; }
+    .divider:not(:empty)::after { margin-left: .75em; }
+
+    .input-group {
+      margin-bottom: 20px;
+    }
+
+    input[type="text"] {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 14px 16px;
+      border-radius: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: rgba(0, 0, 0, 0.3);
+      color: #fff;
+      font-family: inherit;
+      font-size: 1rem;
+      transition: all 0.2s ease;
+      text-align: center;
+    }
+
+    input[type="text"]:focus {
+      outline: none;
+      border-color: var(--accent-glow);
+      box-shadow: 0 0 15px rgba(124, 58, 237, 0.2);
+    }
+
+    /* Room details */
+    .room-code-container {
+      background: rgba(0, 0, 0, 0.25);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 16px;
+      padding: 20px;
+      text-align: center;
+      margin-bottom: 24px;
+    }
+
+    .room-code-label {
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      color: var(--text-secondary);
+      margin-bottom: 6px;
+      letter-spacing: 0.08em;
+      font-weight: 500;
+    }
+
+    .room-code-value {
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: #fff;
+      margin: 0 0 12px 0;
+      letter-spacing: 0.02em;
+    }
+
+    /* Badges */
+    .status-container {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 0.85rem;
+      font-weight: 500;
+    }
+
+    .status-indicator {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+    }
+
+    .status-waiting { background: rgba(245, 158, 11, 0.1); color: var(--warning-color); }
+    .status-waiting .status-indicator { background: var(--warning-color); animation: pulse 1.5s infinite; }
+
+    .status-connecting { background: rgba(59, 130, 246, 0.1); color: var(--info-color); }
+    .status-connecting .status-indicator { background: var(--info-color); animation: pulse 1s infinite; }
+
+    .status-connected { background: rgba(16, 185, 129, 0.1); color: var(--success-color); }
+    .status-connected .status-indicator { background: var(--success-color); }
+
+    .status-failed { background: rgba(239, 68, 68, 0.1); color: var(--error-color); }
+    .status-failed .status-indicator { background: var(--error-color); }
+
+    @keyframes pulse {
+      0% { transform: scale(0.95); opacity: 0.5; }
+      50% { transform: scale(1.2); opacity: 1; }
+      100% { transform: scale(0.95); opacity: 0.5; }
+    }
+
+    /* File selection & Transfer */
+    .file-dropzone {
+      border: 2px dashed rgba(255, 255, 255, 0.12);
+      border-radius: 16px;
+      padding: 35px 20px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      margin-bottom: 20px;
+      background: rgba(255, 255, 255, 0.01);
+    }
+
+    .file-dropzone:hover {
+      border-color: var(--accent-glow);
+      background: rgba(124, 58, 237, 0.03);
+    }
+
+    .file-dropzone-title {
+      font-weight: 500;
+      margin-bottom: 4px;
+    }
+
+    .file-dropzone-subtitle {
+      font-size: 0.8rem;
+      color: var(--text-secondary);
+    }
+
+    .progress-container {
+      background: rgba(0, 0, 0, 0.25);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      border-radius: 16px;
+      padding: 20px;
+      margin-top: 24px;
+      display: none;
+    }
+
+    .progress-info {
+      font-size: 0.9rem;
+      font-weight: 500;
+      margin-bottom: 8px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .progress-bar-wrapper {
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 6px;
+      height: 8px;
+      overflow: hidden;
+      margin: 10px 0;
+    }
+
+    .progress-bar-fill {
+      background: var(--accent-gradient);
+      width: 0%;
+      height: 100%;
+      transition: width 0.1s ease;
+    }
+
+    .progress-stats {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.8rem;
+      color: var(--text-secondary);
+    }
+
+    .error-banner {
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid rgba(239, 68, 68, 0.15);
+      color: #fca5a5;
+      border-radius: 12px;
+      padding: 12px 16px;
+      font-size: 0.9rem;
+      margin-top: 20px;
+      display: none;
+      text-align: center;
+    }
+
+    .waiting-placeholder {
+      text-align: center;
+      padding: 30px;
+      color: var(--text-secondary);
+      font-size: 0.95rem;
+      font-style: italic;
+    }
+
+    .peers-section {
+      margin-bottom: 24px;
+    }
+
+    .peer-item {
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      border-radius: 12px;
+      padding: 12px 16px;
+      margin-bottom: 10px;
+      box-sizing: border-box;
+    }
+
+    .peer-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.9rem;
+    }
+
+    .peer-id {
+      font-weight: 600;
+      color: #c084fc;
+    }
+
+    .peer-status {
+      font-size: 0.8rem;
+      color: var(--text-secondary);
+    }
+  </style>
+  <!--
+    To override the signaling URL at deploy time, insert window.__SIGNALING_URL__ here:
+    <script>window.__SIGNALING_URL__ = "wss://your-tunnel.trycloudflare.com/ws";</script>
+  -->
+</head>
+<body>
+  <div class="blob blob-1"></div>
+  <div class="blob blob-2"></div>
+
+  <div class="app-container">
+    <header>
+      <h1>P2P Share</h1>
+      <div class="subtitle">Direct, secure browser-to-browser file transfer</div>
+    </header>
+
+    <!-- Error Banner -->
+    <div id="error-banner" class="error-banner"></div>
+
+    <!-- Lobby Section (Create/Join) -->
+    <div id="lobby-section" class="section active">
+      <button id="create-room-btn" class="btn btn-primary">
+        Create a Secure Room
+      </button>
+      <div class="divider">OR</div>
+      <div class="input-group">
+        <input type="text" id="join-room-input" placeholder="Enter three-word room code" autocomplete="off" />
+      </div>
+      <button id="join-room-btn" class="btn btn-secondary">
+        Join Room
+      </button>
+    </div>
+
+    <!-- Room Section (Connected state & file transfers) -->
+    <div id="room-section" class="section">
+      <div class="room-code-container">
+        <div class="room-code-label">Room Access Code</div>
+        <div id="room-code-text" class="room-code-value">...</div>
+        <div style="display: flex; gap: 10px; justify-content: center;">
+          <button id="copy-code-btn" class="btn btn-secondary" style="margin: 0; padding: 8px 16px; font-size: 0.85rem; width: auto; display: inline-flex;">
+            Copy Code
+          </button>
+          <button id="copy-link-btn" class="btn btn-secondary" style="margin: 0; padding: 8px 16px; font-size: 0.85rem; width: auto; display: inline-flex;">
+            Copy Link
+          </button>
+        </div>
+      </div>
+
+      <div class="status-container">
+        <div id="status-badge" class="status-badge status-waiting">
+          <div class="status-indicator"></div>
+          <span id="status-text">Waiting for peers...</span>
+        </div>
+      </div>
+
+      <!-- Peers List (1-to-n) -->
+      <div id="peers-section" class="peers-section" style="display: none;">
+        <div class="room-code-label">Connected Peers</div>
+        <div id="peers-list"></div>
+      </div>
+
+      <!-- Sender Flow (only active when connected and host) -->
+      <div id="sender-flow" style="display: none;">
+        <input type="file" id="file-input" style="display: none;" />
+        <div id="file-picker-zone" class="file-dropzone">
+          <div class="file-dropzone-title">Choose a file to share</div>
+          <div id="file-details" class="file-dropzone-subtitle">Click to browse your files</div>
+        </div>
+        <button id="send-file-btn" class="btn btn-primary" disabled>
+          Send File
+        </button>
+      </div>
+
+      <!-- Receiver Flow (only active when connected and guest) -->
+      <div id="receiver-flow" style="display: none;">
+        <div class="waiting-placeholder">
+          Ready to receive files. The host can select and send a file.
+        </div>
+      </div>
+
+      <!-- Progress Indicators (used by both sender and receiver) -->
+      <div id="progress-container" class="progress-container">
+        <div id="progress-filename" class="progress-info">File Transfer</div>
+        <div class="progress-bar-wrapper">
+          <div id="progress-bar-fill" class="progress-bar-fill"></div>
+        </div>
+        <div class="progress-stats">
+          <span id="progress-percent">0%</span>
+          <span id="progress-bytes">0 / 0 bytes</span>
+        </div>
+      </div>
+
+      <button id="leave-room-btn" class="btn btn-secondary">
+        Leave Room
+      </button>
+    </div>
+  </div>
+
+  <script src="dist/bundle.js"></script>
+</body>
+</html>
