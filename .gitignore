@@ -1,0 +1,7 @@
+result
+result-*
+
+server/p2pshare
+
+web/node_modules/
+web/dist/
