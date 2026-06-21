@@ -41,6 +41,7 @@
 | 12 | [Deployment: tunnel + static host](12-phase3-deployment.md) | 3 | 11 | Done |
 | 13 | [Resolve relay auth open question](13-phase4-relay-auth-decision.md) | 4 | 08 | Done |
 | 14 | [Go data relay (fallback)](14-phase4-data-relay.md) | 4 | 13 | In Progress |
+| 15 | [Serverless signaling (Trystero) + Go fallback](15-phase5-serverless-signaling.md) | 5 | 08, 14 | In Progress |
 
 ### Dependency graph
 
@@ -49,7 +50,7 @@
      │              ├── 08 ──┬── 09
      └── 04 ── 05 ──┤        ├── 10
               └ 06 ─┤        ├── 11 ── 12
-              07 ───┘        └── 13 ── 14
+              07 ───┘        └── 13 ── 14 ── 15
 ```
 
 ## Phase gating (SPEC §10)
@@ -58,3 +59,5 @@
 - **Phase 2** (09–10), **Phase 3** (11–12): start only after Phase 1 is Done.
 - **Phase 4** (13–14): conditional. Task 14 may proceed only after task 13
   resolves SPEC §11.1 and the SPEC is updated.
+- **Phase 5** (15): third-party serverless signaling primary, Go fallback. Builds on
+  the relay (14) for NAT. SPEC §3.1/§4.1/§4.2 updated 2026-06-21.

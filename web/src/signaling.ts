@@ -4,6 +4,14 @@ import { SIGNALING_URL } from "./config.js";
 export interface JoinMessage {
   type: "join";
   room?: string;
+  // "host" + a non-empty room asks the server to CREATE the room with that
+  // host-chosen code (SPEC §4.1), used when falling back from Trystero.
+  role?: "host" | "guest";
+}
+
+export interface RelayRequestMessage {
+  type: "relay-request";
+  to: string;
 }
 
 export interface OfferMessage {
@@ -27,7 +35,12 @@ export interface IceMessage {
   candidate: unknown;
 }
 
-export type OutboundMessage = JoinMessage | OfferMessage | AnswerMessage | IceMessage;
+export type OutboundMessage =
+  | JoinMessage
+  | OfferMessage
+  | AnswerMessage
+  | IceMessage
+  | RelayRequestMessage;
 
 export interface JoinedMessage {
   type: "joined";
@@ -70,6 +83,14 @@ export interface InboundIceMessage {
   candidate: unknown;
 }
 
+export interface RelayApprovedMessage {
+  type: "relay-approved";
+  room: string;
+  token: string;
+  to: string;
+  from: string;
+}
+
 export type InboundMessage =
   | JoinedMessage
   | PeerJoinedMessage
@@ -77,7 +98,8 @@ export type InboundMessage =
   | ErrorMessage
   | InboundOfferMessage
   | InboundAnswerMessage
-  | InboundIceMessage;
+  | InboundIceMessage
+  | RelayApprovedMessage;
 
 // Handlers for client consumers
 export type OpenHandler = () => void;
@@ -87,6 +109,7 @@ export type PeerLeftHandler = (peerId: string) => void;
 export type OfferHandler = (from: string, sdp: unknown) => void;
 export type AnswerHandler = (from: string, sdp: unknown) => void;
 export type IceHandler = (from: string, candidate: unknown) => void;
+export type RelayApprovedHandler = (token: string, from: string, to: string) => void;
 export type ErrorHandler = (reason: string) => void;
 export type CloseHandler = () => void;
 
@@ -94,6 +117,7 @@ export class SignalingClient {
   private ws: WebSocket | null = null;
   private readonly url: string;
   private lastRoom: string | null = null;
+  private lastRole: "host" | "guest" | null = null;
   private isExplicitClose = false;
   private reconnectAttempts = 0;
   private reconnectTimer: number | null = null;
@@ -105,6 +129,7 @@ export class SignalingClient {
   public onOffer?: OfferHandler;
   public onAnswer?: AnswerHandler;
   public onIce?: IceHandler;
+  public onRelayApproved?: RelayApprovedHandler;
   public onError?: ErrorHandler;
   public onClose?: CloseHandler;
 
@@ -140,10 +165,14 @@ export class SignalingClient {
       if (this.onOpen) {
         this.onOpen();
       }
-      // Auto-rejoin if we were disconnected mid-session
+      // Auto-rejoin if we were disconnected mid-session, preserving our role.
       if (this.lastRoom) {
         console.log(`Auto-rejoining signaling room: ${this.lastRoom}`);
-        this.joinRoom(this.lastRoom);
+        if (this.lastRole === "host") {
+          this.createRoomWithCode(this.lastRoom);
+        } else {
+          this.joinRoom(this.lastRoom);
+        }
       }
     };
 
@@ -188,6 +217,7 @@ export class SignalingClient {
   public close(): void {
     this.isExplicitClose = true;
     this.lastRoom = null;
+    this.lastRole = null;
     this.reconnectAttempts = 0;
     if (this.reconnectTimer) {
       window.clearTimeout(this.reconnectTimer);
@@ -209,6 +239,7 @@ export class SignalingClient {
       switch (msg.type) {
         case "joined":
           this.lastRoom = msg.room; // Track last room code
+          this.lastRole = msg.role; // Track role for correct auto-rejoin
           if (this.onJoined) this.onJoined(msg);
           break;
         case "peer-joined":
@@ -225,6 +256,9 @@ export class SignalingClient {
           break;
         case "ice":
           if (this.onIce) this.onIce(msg.from, msg.candidate);
+          break;
+        case "relay-approved":
+          if (this.onRelayApproved) this.onRelayApproved(msg.token, msg.from, msg.to);
           break;
         case "error":
           if (this.onError) this.onError(msg.reason);
@@ -248,10 +282,18 @@ export class SignalingClient {
   }
 
   /**
-   * Create a new room as host.
+   * Create a new room as host (server generates the code).
    */
   public createRoom(): void {
     this.send({ type: "join" });
+  }
+
+  /**
+   * Create a room as host using a client-chosen code (SPEC §4.1). Used when the
+   * host falls back from the third-party signaling transport to the Go server.
+   */
+  public createRoomWithCode(roomCode: string): void {
+    this.send({ type: "join", room: roomCode, role: "host" });
   }
 
   /**
@@ -259,6 +301,14 @@ export class SignalingClient {
    */
   public joinRoom(roomCode: string): void {
     this.send({ type: "join", room: roomCode });
+  }
+
+  /**
+   * Ask the server to set up an authenticated data relay session with a peer
+   * (SPEC §4.3). Only valid for the host. The server replies with relay-approved.
+   */
+  public sendRelayRequest(to: string): void {
+    this.send({ type: "relay-request", to });
   }
 
   /**

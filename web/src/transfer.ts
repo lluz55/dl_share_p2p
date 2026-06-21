@@ -4,6 +4,13 @@ export interface FileMetadata {
   mimeType: string;
 }
 
+// Minimal structural type satisfied by both RTCDataChannel and WebSocket, so the
+// same receiver framing works for direct P2P (DataChannel) and the Go relay (WS).
+export interface MessageChannelLike {
+  binaryType: BinaryType;
+  onmessage: ((event: MessageEvent) => void) | null;
+}
+
 /**
  * Send a file over a WebRTC DataChannel with chunking and backpressure.
  * Decoupled from the DOM.
@@ -97,7 +104,7 @@ export class FileReceiver {
   public onComplete?: (metadata: FileMetadata, blob: Blob) => void;
   public onError?: (err: Error) => void;
 
-  constructor(channel: RTCDataChannel) {
+  constructor(channel: MessageChannelLike) {
     channel.binaryType = "arraybuffer";
     channel.onmessage = (event) => {
       this.handleMessage(event);

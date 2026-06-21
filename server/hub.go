@@ -158,7 +158,14 @@ func (h *Hub) deleteRoomInternal(room *Room) {
 }
 
 // JoinOrCreateRoom handles the logic of a peer trying to join or create a room.
-func (h *Hub) JoinOrCreateRoom(peer *Peer, requestedRoom string) (*Room, error) {
+//
+// Behaviour by (requestedRoom, asHost):
+//   - ("", _)        → create a room with a server-generated code (host).
+//   - (code, true)   → create a room with the host-chosen code (host); errors "code-taken"
+//     if it already exists. Used when a host falls back from the third-party signaling
+//     transport to the Go server keeping the same rendezvous code (SPEC §4.1).
+//   - (code, false)  → join an existing room with that code (guest).
+func (h *Hub) JoinOrCreateRoom(peer *Peer, requestedRoom string, asHost bool) (*Room, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -172,8 +179,8 @@ func (h *Hub) JoinOrCreateRoom(peer *Peer, requestedRoom string) (*Room, error) 
 		return nil, errors.New("peer already in a room")
 	}
 
-	if requestedRoom == "" {
-		// Create room (Host role)
+	if requestedRoom == "" || asHost {
+		// Create room (Host role) — with a generated code or the host-chosen one.
 		if len(h.rooms) >= h.config.MaxGlobalRooms {
 			return nil, errors.New("global room cap reached")
 		}
@@ -183,15 +190,23 @@ func (h *Hub) JoinOrCreateRoom(peer *Peer, requestedRoom string) (*Room, error) 
 		}
 
 		var code string
-		var err error
-		// Try up to 5 times to generate a unique code
-		for i := 0; i < 5; i++ {
-			code, err = GenerateRoomCode()
-			if err != nil {
-				return nil, fmt.Errorf("failed to generate room code: %w", err)
+		if requestedRoom != "" {
+			// Host-chosen code: accept it if free, reject if taken.
+			if _, exists := h.rooms[requestedRoom]; exists {
+				return nil, errors.New("code-taken")
 			}
-			if _, exists := h.rooms[code]; !exists {
-				break
+			code = requestedRoom
+		} else {
+			var err error
+			// Try up to 5 times to generate a unique code
+			for i := 0; i < 5; i++ {
+				code, err = GenerateRoomCode()
+				if err != nil {
+					return nil, fmt.Errorf("failed to generate room code: %w", err)
+				}
+				if _, exists := h.rooms[code]; !exists {
+					break
+				}
 			}
 		}
 

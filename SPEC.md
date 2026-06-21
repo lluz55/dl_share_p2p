@@ -22,11 +22,12 @@ Keywords MUST, MUST NOT, SHOULD, SHOULD NOT, MAY follow RFC 2119 sense.
 
 ## 1. Project summary
 
-A web application for sharing files peer-to-peer between devices, including devices behind NAT. A self-hosted Go server acts as an intermediary for signaling and, only when direct peer-to-peer fails, as an authenticated data relay. The project is developed by LLM agents under spec-driven development.
+A web application for sharing files peer-to-peer between devices, including devices behind NAT. Peers find each other and exchange WebRTC signaling primarily through a **third-party serverless matchmaking service** (no intermediary of ours). A self-hosted Go server is used only as a fallback: it provides signaling when the third-party service is unavailable and acts as an authenticated data relay when direct peer-to-peer is impossible. The project is developed by LLM agents under spec-driven development.
 
 ### 1.1 Goals
 
 - Share files directly between browsers (P2P), end-to-end encrypted by WebRTC's transport.
+- Pair peers without our own server when possible, via a third-party serverless signaling service (Trystero over Nostr — see §2).
 - Work across NAT using public STUN; fall back to a server-side relay only when direct P2P is impossible.
 - Minimal frontend bloat.
 - Reproducible build and deploy via Nix.
@@ -39,14 +40,20 @@ A web application for sharing files peer-to-peer between devices, including devi
 - No TURN-protocol relay (the only relay is the Go WebSocket data relay defined in §4.3).
 - No persistence of files on the server.
 
+> Clarification: the third-party serverless service (§2) is used **only for signaling /
+> matchmaking** (exchanging SDP/ICE to pair peers). It is NOT a TURN server and NEVER
+> carries file bytes. File data flows either directly peer-to-peer or through the Go data
+> relay (§4.3) — never through the third-party service.
+
 ---
 
 ## 2. Technology stack
 
 | Layer | Choice | Notes |
 |---|---|---|
-| Backend | Go | Signaling + authenticated data relay. |
+| Backend | Go | Fallback signaling + authenticated data relay. |
 | Frontend | TypeScript (vanilla) + esbuild | No framework. Minimal bundle. |
+| Primary signaling | Trystero (Nostr strategy) | Serverless WebRTC matchmaking over public Nostr relays. Zero-config, no account. Signaling only — never carries file data. |
 | Transport | WebRTC DataChannel | Primary path for file transfer. |
 | NAT discovery | Public STUN | e.g. `stun:stun.l.google.com:19302`. No third-party TURN. |
 | IaC / build | flake.nix | devShell + packages. |
@@ -60,37 +67,54 @@ The server MUST NOT depend on any Cloudflare service other than the Tunnel.
 
 ## 3. Architecture overview
 
-Two origins. The static frontend is served from a free static host on its own
-HTTPS domain. The Go server runs on the developer's machine, bound to localhost,
-and is reached only through Cloudflare Tunnel over WSS.
+Two origins plus a third-party signaling network. The static frontend is served from a
+free static host on its own HTTPS domain. Peers primarily pair through the third-party
+serverless signaling service (Trystero/Nostr). The Go server runs on the developer's
+machine, bound to localhost, reached only through Cloudflare Tunnel over WSS, and is used
+only as a fallback (signaling when the third party is down, plus the data relay).
 
 ```
-┌────────────────────┐                  ┌──────────────────────────┐
-│  static frontend   │                  │  local machine           │
-│  (Pages/Netlify)   │                  │  Go server  127.0.0.1     │
-│  https://app.example│                 │   - signaling (always on) │
-└─────────┬──────────┘                  │   - data relay (fallback) │
-          │                             └────────────┬─────────────┘
-          │  WSS  /ws                                │ cloudflared
-          └─────────────────────────────────────────┘
-                wss://<tunnel-hostname>/ws
+┌────────────────────┐      ┌───────────────────────┐
+│  static frontend   │      │  third-party signaling │
+│  (Pages/Netlify)   │◀────▶│  Trystero / Nostr      │  primary: pair peers (SDP/ICE)
+│  https://app.example│     │  (public relays)       │
+└─────────┬──────────┘      └───────────────────────┘
+          │                  ┌──────────────────────────┐
+          │  WSS  /ws,/relay │  local machine           │
+          └─────────────────▶│  Go server  127.0.0.1    │  fallback only:
+                cloudflared   │   - signaling (fallback) │   - signaling if 3rd party down
+                              │   - data relay (NAT)     │   - relay if direct P2P fails
+                              └──────────────────────────┘
 ```
 
 ### 3.1 Transport chain (authoritative)
 
 ```
-1. Signaling via Go (WebSocket) .................. ALWAYS ON. Base of everything.
-2. Attempt direct P2P (WebRTC + public STUN)
-      ├─ success → transfer peer-to-peer. NO authentication. Server never sees data.
-      └─ failure → data relay via Go (WebSocket)
-                      ├─ requires prior authentication approved by the backend
-                      └─ only then is file transfer permitted
+1. Signaling via third-party (Trystero/Nostr) ... PRIMARY. Serverless, no intermediary of ours.
+      ├─ peers pair within the handshake window
+      │     ├─ direct P2P OK (WebRTC + public STUN) → transfer peer-to-peer.
+      │     │                                          NO auth. Nobody but the peers sees data.
+      │     └─ direct P2P fails (NAT) → data relay via Go (see step 3)
+      └─ third-party unavailable (no peer paired in time / error)
+                                       → fall back to signaling via Go (WebSocket /ws)
+                                          then attempt direct P2P, else data relay (step 3)
+
+2. Direct P2P (WebRTC + public STUN): preferred path for file transfer either way.
+
+3. Data relay via Go (WebSocket /relay): fallback only.
+      ├─ requires prior authentication approved by the backend
+      └─ only then is file transfer permitted
 ```
 
 Rules:
-- The Go signaling path is always active and has no alternative or fallback. It is the base, not a fallback.
-- There is NO third-party TURN in the chain. If direct P2P fails, the only fallback is the Go data relay.
-- Direct P2P file transfer MUST NOT require any authentication; the server does not see that data.
+- The primary signaling path is the third-party serverless service. The Go signaling path is a
+  fallback used only when the third party fails to pair peers in time or errors.
+- Both signaling transports use the **same room code** (§4.1) as the rendezvous key, so a peer
+  pair can move from the third-party path to the Go path (for fallback signaling or for the data
+  relay) without any out-of-band coordination.
+- The third-party service is signaling only and MUST NOT carry file bytes.
+- There is NO third-party TURN in the chain. If direct P2P fails, the only data fallback is the Go data relay.
+- Direct P2P file transfer MUST NOT require any authentication; no server sees that data.
 - The Go data relay MUST NOT transmit any file bytes until backend-approved authentication has completed.
 
 > Terminology note: the user has informally called the Go data relay "TURN".
@@ -104,6 +128,7 @@ Rules:
 ### 4.1 Peer discovery / rooms
 
 - A room is identified by a code consisting of **three random words** (e.g. `tiger-harbor-velvet`). The code is the access credential to the room.
+- The code is **generated on the client** by the host (so it can be shown instantly and used as the rendezvous key for both signaling transports — §3.1). The word list and generation MUST match the server's (`server/room.go`) so a host-chosen code is valid on the Go fallback. When a host falls back to or relays through the Go server, the server MUST accept the host's existing code (creating the room with that code; rejecting with `code-taken` if it already exists).
 - The peer that creates the room is the **host**. A peer that joins with the code is a **guest**.
 - The system MUST support both **1↔1** (host + one guest) and **1↔n** (host + multiple guests) using the same room mechanism. For 1↔n the host opens a separate `RTCPeerConnection` per guest.
 - A room SHOULD close to new joins once the expected number of participants is reached (see §6 safeguards).
@@ -111,10 +136,12 @@ Rules:
 
 ### 4.2 Signaling
 
-- The Go server exchanges WebRTC `offer` / `answer` / `ice` messages between host and guest(s) within a room.
+- Signaling has two transports over the **same room code**:
+  - **Primary — third-party serverless (Trystero/Nostr):** peers join a room named by the code and exchange WebRTC SDP/ICE through public Nostr relays. No intermediary of ours.
+  - **Fallback — Go server (`/ws`):** the Go server exchanges WebRTC `offer` / `answer` / `ice` messages between host and guest(s) within a room. Used only when the third party fails to pair peers in time or errors (§3.1).
+- The client attempts the primary transport first; if no peer pairs within a short window (default ~8s) or the transport errors, it falls back to the Go transport using the same code.
 - Signaling requires **no user authentication**; possession of the room code is the only requirement to participate.
-- Signaling is always on.
-- The ICE server configuration MUST be a swappable list (currently public STUN only) so a relay/TURN entry could be added later without code changes elsewhere.
+- The ICE server configuration MUST be a swappable list (currently public STUN only) so a relay/TURN entry could be added later without code changes elsewhere. The same ICE list MUST be passed to the third-party signaling layer's WebRTC config.
 
 ### 4.3 File transfer
 
@@ -257,6 +284,16 @@ Deployment model:
 **Phase 4 (conditional)**
 - Go data relay fallback, once §11.1 (relay auth) is resolved, including relay-specific limits.
 
+**Phase 5 — Serverless signaling + fallback**
+- Third-party serverless signaling (Trystero/Nostr) as the primary path; the room code is
+  generated client-side and shared across transports.
+- Go signaling becomes a fallback (used when the third party fails to pair peers in time).
+- Go server accepts a host-chosen room code (§4.1).
+- Direct P2P over the third-party path uses the Trystero native binary transfer; the Go path
+  keeps the existing chunked DataChannel transfer (§4.3) and the Go data relay for NAT.
+- 5a: full 1↔1 (third-party primary, Go signaling fallback, Go relay on NAT). 1↔n direct P2P
+  over the third-party path works natively. 5b (later): per-guest relay escalation for 1↔n.
+
 A phase's work MUST NOT begin pulling in deferred items from later phases without promoting them in this document first.
 
 ---
@@ -269,10 +306,13 @@ A phase's work MUST NOT begin pulling in deferred items from later phases withou
 
 ## 12. Glossary
 
-- **Host** — peer that creates a room and holds the code.
+- **Host** — peer that creates a room and holds the code. The host generates the code client-side.
 - **Guest** — peer that joins a room using the code.
-- **Signaling** — exchange of WebRTC offer/answer/ICE via the Go server. Always on.
-- **Direct P2P** — WebRTC DataChannel connection established via STUN; server does not see data; no auth.
+- **Signaling** — exchange of WebRTC offer/answer/ICE to pair peers. Primary transport is the
+  third-party serverless service; the Go server is the fallback transport.
+- **Trystero** — third-party serverless WebRTC matchmaking library (Nostr strategy) used as the
+  primary signaling transport. Signaling only; never carries file bytes.
+- **Direct P2P** — WebRTC DataChannel connection established via STUN; no server sees data; no auth.
 - **Data relay** — Go WebSocket relay used only when direct P2P fails; requires backend-approved auth. Informally (and incorrectly) called "TURN" by stakeholders; it is NOT the TURN protocol.
 - **Tunnel** — Cloudflare Tunnel; the only public entry point; tunnels HTTP/WS only.
 
@@ -280,6 +320,7 @@ A phase's work MUST NOT begin pulling in deferred items from later phases withou
 
 ## 13. Changelog
 
+- **2026-06-21** — Phase 5: third-party serverless signaling (Trystero/Nostr) becomes the primary signaling transport; Go signaling demoted to fallback. Room code now generated client-side and shared across transports; Go server accepts a host-chosen code. Updated §1, §2, §3, §3.1, §4.1, §4.2, §10, §12.
 - **2026-06-20** — Resolved word list source and size (§11.3) to use 160 Portuguese ASCII-only lowercase words.
 - **2026-06-20** — Resolved relay authentication mechanism (§11.1) and limits (§11.2); updated §4.3.
 - **2026-06-20** — Initial specification consolidated from planning sessions.

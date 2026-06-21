@@ -1,6 +1,6 @@
-import { SignalingClient } from "./signaling.js";
-import { PeerConnectionManager, ConnectionState } from "./peer.js";
-import { sendFile, FileReceiver, triggerDownload } from "./transfer.js";
+import { ConnectionOrchestrator } from "./orchestrator.js";
+import type { PeerState } from "./transport.js";
+import { triggerDownload } from "./transfer.js";
 import QRCode from "qrcode";
 import { Html5Qrcode } from "html5-qrcode";
 
@@ -55,15 +55,13 @@ const scannerError = document.getElementById("scanner-error")!;
 // State variables
 let role: "host" | "guest" | null = null;
 let currentFile: File | null = null;
-let receiver: FileReceiver | null = null;
 let guestTransferStartTime: number | null = null;
 let html5QrCode: Html5Qrcode | null = null;
 let scannerActive = false;
 
 // Track active guests (only used when role === "host")
 interface GuestInfo {
-  channel: RTCDataChannel;
-  state: ConnectionState;
+  state: PeerState;
   bytesSent: number;
   totalBytes: number;
   startTime?: number; // timestamp when sending started
@@ -72,9 +70,8 @@ interface GuestInfo {
 }
 const activeGuests = new Map<string, GuestInfo>();
 
-// Initialize components
-const signaling = new SignalingClient();
-const peerManager = new PeerConnectionManager(signaling);
+// Single entry point for connectivity: third-party signaling primary, Go fallback.
+const orchestrator = new ConnectionOrchestrator();
 
 // Utility: Show/hide error banner
 function showError(msg: string): void {
@@ -251,7 +248,7 @@ function stopScanner(): Promise<void> {
 function resetToLobby(): void {
   role = null;
   currentFile = null;
-  receiver = null;
+  guestTransferStartTime = null;
   activeGuests.clear();
   fileInput.value = "";
   fileDetails.textContent = "Click to browse your files";
@@ -314,10 +311,7 @@ copyLinkBtn.addEventListener("click", () => {
 // Create Room Action
 createRoomBtn.addEventListener("click", () => {
   clearError();
-  signaling.onOpen = () => {
-    signaling.createRoom();
-  };
-  signaling.connect();
+  orchestrator.createRoom();
 });
 
 // Join Room Action
@@ -328,16 +322,12 @@ joinRoomBtn.addEventListener("click", () => {
     return;
   }
   clearError();
-  signaling.onOpen = () => {
-    signaling.joinRoom(code);
-  };
-  signaling.connect();
+  orchestrator.joinRoom(code);
 });
 
 // Leave Room Action
 leaveRoomBtn.addEventListener("click", () => {
-  signaling.close();
-  peerManager.closeAll();
+  orchestrator.leave();
   resetToLobby();
 });
 
@@ -357,7 +347,7 @@ sendFileBtn.addEventListener("click", () => {
   if (role !== "host" || !currentFile) return;
 
   const connectedGuests = Array.from(activeGuests.entries()).filter(
-    ([_, info]) => info.state === "connected" && info.channel.readyState === "open"
+    ([_, info]) => info.state === "connected"
   );
 
   if (connectedGuests.length === 0) return;
@@ -369,16 +359,11 @@ sendFileBtn.addEventListener("click", () => {
     info.totalBytes = currentFile!.size;
     info.complete = false;
     info.error = undefined;
+    info.startTime = Date.now();
     renderPeersList();
 
-    return sendFile(info.channel, currentFile!, (sentBytes, totalBytes) => {
-      info.bytesSent = sentBytes;
-      info.totalBytes = totalBytes;
-      if (sentBytes === totalBytes) {
-        info.complete = true;
-      }
-      renderPeersList();
-    }).catch((err: Error) => {
+    // Progress is reported via orchestrator.onSendProgress.
+    return orchestrator.sendFile(peerId, currentFile!).catch((err: Error) => {
       info.error = err.message || "Failed";
       renderPeersList();
       throw err;
@@ -391,11 +376,10 @@ sendFileBtn.addEventListener("click", () => {
   });
 });
 
-// Signaling connection callbacks
-signaling.onJoined = (data) => {
-  peerManager.handleJoined(data.self, data.role);
-  role = data.role;
-  roomCodeText.textContent = data.room;
+// Orchestrator callbacks (transport-agnostic: serverless primary, Go fallback)
+orchestrator.onReady = (joinedRole, code) => {
+  role = joinedRole;
+  roomCodeText.textContent = code;
   lobbySection.classList.remove("active");
   roomSection.classList.add("active");
 
@@ -413,63 +397,36 @@ signaling.onJoined = (data) => {
   updateStatusBadge("waiting", "Waiting for peers...");
 };
 
-signaling.onPeerJoined = (peerId) => {
-  peerManager.handlePeerJoined(peerId);
-  updateStatusBadge("connecting", "Peer joining, connecting...");
-};
-
-signaling.onPeerLeft = (peerId) => {
-  peerManager.handlePeerLeft(peerId);
-  if (role === "host") {
-    activeGuests.delete(peerId);
-    renderPeersList();
-    updateHostGlobalStatus();
-    updateSenderUI();
-  }
-};
-
-signaling.onError = (reason) => {
-  showError(reason);
-  if (!roomSection.classList.contains("active")) {
-    signaling.close();
-    resetToLobby();
-  }
-};
-
-signaling.onClose = () => {
-  peerManager.closeAll();
-  resetToLobby();
-};
-
-// Peer connection manager callbacks
-peerManager.onConnectionStateChange = (peerId, state) => {
-  console.log(`Connection state with peer ${peerId} changed to ${state}`);
+orchestrator.onPeerState = (peerId, state) => {
+  console.log(`Peer ${peerId} state: ${state}`);
 
   if (role === "host") {
-    const info = activeGuests.get(peerId);
-    if (info) {
-      info.state = state;
-      if (state === "closed" || state === "disconnected") {
-        activeGuests.delete(peerId);
+    if (state === "closed") {
+      activeGuests.delete(peerId);
+    } else {
+      const info = activeGuests.get(peerId);
+      if (info) {
+        info.state = state;
+      } else {
+        activeGuests.set(peerId, { state, bytesSent: 0, totalBytes: 0 });
       }
     }
     renderPeersList();
     updateHostGlobalStatus();
     updateSenderUI();
   } else {
-    // Guest logic: single remote peer (Host)
+    // Guest: single remote peer (the host).
     switch (state) {
       case "connecting":
-        updateStatusBadge("connecting", "Connecting (Direct P2P)...");
+        updateStatusBadge("connecting", "Connecting…");
         break;
       case "connected":
-        updateStatusBadge("connected", "Connected (Direct P2P)");
+        updateStatusBadge("connected", "Connected");
         break;
       case "failed":
-        updateStatusBadge("failed", "Direct connection failed.");
-        showError("Direct connection could not be established. Falling back is not supported in Phase 1.");
+        updateStatusBadge("failed", "Connection failed.");
+        showError("Could not connect to the host.");
         break;
-      case "disconnected":
       case "closed":
         updateStatusBadge("waiting", "Waiting for peers...");
         progressContainer.style.display = "none";
@@ -478,76 +435,59 @@ peerManager.onConnectionStateChange = (peerId, state) => {
   }
 };
 
-peerManager.onDataChannel = (peerId, channel) => {
-  console.log(`DataChannel established with peer ${peerId}`);
+orchestrator.onSendProgress = (peerId, sentBytes, totalBytes) => {
+  if (role !== "host") return;
+  const info = activeGuests.get(peerId);
+  if (!info) return;
+  info.bytesSent = sentBytes;
+  info.totalBytes = totalBytes;
+  if (sentBytes === totalBytes) {
+    info.complete = true;
+  }
+  renderPeersList();
+};
 
-  if (role === "host") {
-    activeGuests.set(peerId, {
-      channel,
-      state: "connected",
-      bytesSent: 0,
-      totalBytes: 0,
-    });
-    renderPeersList();
-    updateHostGlobalStatus();
-    updateSenderUI();
+orchestrator.onReceiveProgress = (receivedBytes, totalBytes) => {
+  progressContainer.style.display = "block";
+  progressFilename.textContent = `Receiving file...`;
 
-    channel.onopen = () => {
-      const info = activeGuests.get(peerId);
-      if (info) {
-        info.state = "connected";
-      }
-      renderPeersList();
-      updateHostGlobalStatus();
-      updateSenderUI();
-    };
+  if (receivedBytes === 0 || !guestTransferStartTime) {
+    guestTransferStartTime = Date.now();
+  }
 
-    channel.onclose = () => {
-      activeGuests.delete(peerId);
-      renderPeersList();
-      updateHostGlobalStatus();
-      updateSenderUI();
-    };
-  } else {
-    // Guest prepares to receive files from Host
-    receiver = new FileReceiver(channel);
+  const pct = totalBytes > 0 ? Math.round((receivedBytes / totalBytes) * 100) : 0;
+  progressBarFill.style.width = `${pct}%`;
+  progressPercent.textContent = `${pct}%`;
 
-    receiver.onProgress = (receivedBytes, totalBytes) => {
-      progressContainer.style.display = "block";
-      progressFilename.textContent = `Receiving file...`;
-      
-      if (receivedBytes === 0 || !guestTransferStartTime) {
-        guestTransferStartTime = Date.now();
-      }
+  const elapsed = (Date.now() - guestTransferStartTime) / 1000;
+  const speed = elapsed > 0 ? receivedBytes / elapsed : 0;
+  const remainingBytes = totalBytes - receivedBytes;
+  const eta = speed > 0 ? Math.round(remainingBytes / speed) : 0;
 
-      const pct = Math.round((receivedBytes / totalBytes) * 100);
-      progressBarFill.style.width = `${pct}%`;
-      progressPercent.textContent = `${pct}%`;
+  let statsText = `${formatBytes(receivedBytes)} / ${formatBytes(totalBytes)}`;
+  if (speed > 0) {
+    statsText += ` @ ${formatBytes(speed)}/s | ETA: ${eta}s`;
+  }
+  progressBytes.textContent = statsText;
+};
 
-      const elapsed = (Date.now() - guestTransferStartTime) / 1000;
-      const speed = elapsed > 0 ? receivedBytes / elapsed : 0;
-      const remainingBytes = totalBytes - receivedBytes;
-      const eta = speed > 0 ? Math.round(remainingBytes / speed) : 0;
+orchestrator.onReceiveComplete = (metadata, blob) => {
+  progressFilename.textContent = `Completed: ${metadata.name}`;
+  progressBarFill.style.width = "100%";
+  progressPercent.textContent = "100%";
+  guestTransferStartTime = null;
+  triggerDownload(blob, metadata.name);
+};
 
-      let statsText = `${formatBytes(receivedBytes)} / ${formatBytes(totalBytes)}`;
-      if (speed > 0) {
-        statsText += ` @ ${formatBytes(speed)}/s | ETA: ${eta}s`;
-      }
-      progressBytes.textContent = statsText;
-    };
+orchestrator.onPathLabel = (label) => {
+  statusText.textContent = label;
+};
 
-    receiver.onComplete = (metadata, blob) => {
-      progressFilename.textContent = `Completed: ${metadata.name}`;
-      progressBarFill.style.width = "100%";
-      progressPercent.textContent = "100%";
-      guestTransferStartTime = null; // Reset transfer clock
-      triggerDownload(blob, metadata.name);
-    };
-
-    receiver.onError = (err) => {
-      showError(`Transfer error: ${err.message}`);
-      guestTransferStartTime = null;
-    };
+orchestrator.onError = (reason) => {
+  showError(reason);
+  if (!roomSection.classList.contains("active")) {
+    orchestrator.leave();
+    resetToLobby();
   }
 };
 
@@ -596,10 +536,7 @@ scanQrBtn.addEventListener("click", () => {
           joinRoomInput.value = code;
           // Connect to the room automatically
           clearError();
-          signaling.onOpen = () => {
-            signaling.joinRoom(code);
-          };
-          signaling.connect();
+          orchestrator.joinRoom(code);
         });
       }
     },
@@ -630,9 +567,6 @@ window.addEventListener("DOMContentLoaded", () => {
     joinRoomInput.value = cleanRoom;
     // Auto-join the room
     clearError();
-    signaling.onOpen = () => {
-      signaling.joinRoom(cleanRoom);
-    };
-    signaling.connect();
+    orchestrator.joinRoom(cleanRoom);
   }
 });

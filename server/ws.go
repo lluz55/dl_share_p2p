@@ -242,7 +242,10 @@ func (c *connection) readPump() {
 				break
 			}
 
-			room, err := c.hub.JoinOrCreateRoom(c.peer, msg.Room)
+			// A non-empty room with role "host" means: create the room with the
+			// host-chosen code (host fell back from third-party signaling, SPEC §4.1).
+			asHost := msg.Role == "host"
+			room, err := c.hub.JoinOrCreateRoom(c.peer, msg.Room, asHost)
 			if err != nil {
 				c.logger.Warn("join/create room failed", "err", err)
 				c.sendError(err.Error())

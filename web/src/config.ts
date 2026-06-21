@@ -15,6 +15,10 @@ export const SIGNALING_URL: string =
     (window as unknown as { __SIGNALING_URL__?: string }).__SIGNALING_URL__) ||
   "ws://127.0.0.1:18085/ws"; // dev fallback only — override before deploying
 
+// Go data relay endpoint (SPEC §4.3), derived from the signaling URL: the server
+// exposes both /ws and /relay on the same origin/tunnel.
+export const RELAY_URL: string = SIGNALING_URL.replace(/\/ws(\?|$)/, "/relay$1");
+
 // Swappable ICE server list (SPEC §4.2). Extensible without touching Peer code.
 export const RTC_CONFIGURATION: RTCConfiguration = {
   iceServers: [

@@ -86,7 +86,7 @@ func TestHubJoinLeave(t *testing.T) {
 	}
 
 	// Create room
-	room, err := hub.JoinOrCreateRoom(peerHost, "")
+	room, err := hub.JoinOrCreateRoom(peerHost, "", false)
 	if err != nil {
 		t.Fatalf("JoinOrCreateRoom failed: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestHubJoinLeave(t *testing.T) {
 	}
 
 	// Join room
-	room2, err := hub.JoinOrCreateRoom(peerGuest, room.Code)
+	room2, err := hub.JoinOrCreateRoom(peerGuest, room.Code, false)
 	if err != nil {
 		t.Fatalf("JoinOrCreateRoom join failed: %v", err)
 	}
@@ -137,6 +137,43 @@ func TestHubJoinLeave(t *testing.T) {
 		}
 	default:
 		t.Error("host did not receive peer-left event")
+	}
+}
+
+func TestHostChosenRoomCode(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	config := DefaultConfig()
+	hub := NewHub(logger, config, NewRelayManager(logger))
+
+	host := &Peer{ID: "host-1", IP: "127.0.0.1", Send: make(chan []byte, 10)}
+	guest := &Peer{ID: "guest-1", IP: "127.0.0.2", Send: make(chan []byte, 10)}
+	other := &Peer{ID: "host-2", IP: "127.0.0.3", Send: make(chan []byte, 10)}
+	_ = hub.RegisterPeer(host)
+	_ = hub.RegisterPeer(guest)
+	_ = hub.RegisterPeer(other)
+
+	const code = "tigre-rio-veludo"
+
+	// Host creates the room with its own chosen code.
+	room, err := hub.JoinOrCreateRoom(host, code, true)
+	if err != nil {
+		t.Fatalf("host create with chosen code failed: %v", err)
+	}
+	if room.Code != code {
+		t.Errorf("expected room code %q, got %q", code, room.Code)
+	}
+	if host.Role != "host" {
+		t.Errorf("expected host role, got %s", host.Role)
+	}
+
+	// Guest joins the same chosen code.
+	if _, err := hub.JoinOrCreateRoom(guest, code, false); err != nil {
+		t.Fatalf("guest join chosen code failed: %v", err)
+	}
+
+	// A second host attempting the same code must be rejected as code-taken.
+	if _, err := hub.JoinOrCreateRoom(other, code, true); err == nil || err.Error() != "code-taken" {
+		t.Errorf("expected code-taken error, got %v", err)
 	}
 }
 
@@ -188,11 +225,11 @@ func TestRoutingIsolation(t *testing.T) {
 	_ = hub.RegisterPeer(h2)
 	_ = hub.RegisterPeer(g2)
 
-	r1, _ := hub.JoinOrCreateRoom(h1, "")
-	_, _ = hub.JoinOrCreateRoom(g1, r1.Code)
+	r1, _ := hub.JoinOrCreateRoom(h1, "", false)
+	_, _ = hub.JoinOrCreateRoom(g1, r1.Code, false)
 
-	r2, _ := hub.JoinOrCreateRoom(h2, "")
-	_, _ = hub.JoinOrCreateRoom(g2, r2.Code)
+	r2, _ := hub.JoinOrCreateRoom(h2, "", false)
+	_, _ = hub.JoinOrCreateRoom(g2, r2.Code, false)
 
 	// Route within room 1 (h1 -> g1)
 	sdpPayload := json.RawMessage(`"opaque-sdp"`)

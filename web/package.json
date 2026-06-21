@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "html5-qrcode": "^2.3.8",
-    "qrcode": "^1.5.4"
+    "qrcode": "^1.5.4",
+    "trystero": "^0.25.2"
   }
 }
