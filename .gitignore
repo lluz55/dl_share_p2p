@@ -5,3 +5,9 @@ server/p2pshare
 
 web/node_modules/
 web/dist/
+
+# Secrets & Credentials
+secrets/*.dec.yaml
+*~
+*.swp
+*.tmp
