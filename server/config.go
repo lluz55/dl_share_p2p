@@ -28,7 +28,7 @@ type Config struct {
 // DefaultConfig returns the standard production/security defaults.
 func DefaultConfig() Config {
 	return Config{
-		Port:               "8080",
+		Port:               "18085",
 		AllowedOrigins:     nil, // If nil, defaults to localhost for development
 		HandshakeTimeout:   10 * time.Second,
 		PingInterval:       30 * time.Second,

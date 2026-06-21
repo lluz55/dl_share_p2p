@@ -21,7 +21,7 @@ Make sure you have Nix installed with flakes enabled.
    ```bash
    go run ./server
    ```
-   *The server starts listening on `127.0.0.1:8080`.*
+   *The server starts listening on `127.0.0.1:18085`.*
 
 ### Step 2: Build the Frontend
 1. Open another terminal in the project root.

@@ -9,7 +9,7 @@ in
 
     port = lib.mkOption {
       type = lib.types.port;
-      default = 8085;
+      default = 18085;
       description = "Port the Go backend server binds to.";
     };
 

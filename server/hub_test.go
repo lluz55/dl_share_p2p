@@ -14,7 +14,7 @@ func TestCheckOrigin(t *testing.T) {
 	if !checkOrigin(nil, "http://localhost:3000", nil) {
 		t.Error("expected localhost to be allowed under dev mode")
 	}
-	if !checkOrigin(nil, "https://127.0.0.1:8080", nil) {
+	if !checkOrigin(nil, "https://127.0.0.1:18085", nil) {
 		t.Error("expected 127.0.0.1 to be allowed under dev mode")
 	}
 	if checkOrigin(nil, "https://example.com", nil) {

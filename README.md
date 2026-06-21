@@ -16,7 +16,7 @@ If you have Nix installed with flakes enabled, you can run and build the entire 
 
 ### 1. Run the Signaling Server (Go)
 
-Run the server with the default port (`8080`):
+Run the server with the default port (`18085`):
 ```sh
 nix run .#server
 # or simply:
@@ -61,10 +61,10 @@ nix run .#frontend-serve -- -p 3000
 *   **Inject a custom signaling URL dynamically at runtime (no rebuild needed):**
     ```sh
     # Bash/Zsh:
-    SIGNALING_URL=ws://127.0.0.1:8080/ws nix run .#frontend-serve -- -p 3000
+    SIGNALING_URL=ws://127.0.0.1:18085/ws nix run .#frontend-serve -- -p 3000
 
     # Fish shell:
-    env SIGNALING_URL=ws://127.0.0.1:8080/ws nix run .#frontend-serve -- -p 3000
+    env SIGNALING_URL=ws://127.0.0.1:18085/ws nix run .#frontend-serve -- -p 3000
     ```
 
 ---
@@ -88,7 +88,7 @@ go test -v -race ./...
 ### 3. Run Backend (Development)
 ```sh
 cd server
-go run . -port 8080
+go run . -port 18085
 ```
 
 ### 4. Build Frontend (Development)

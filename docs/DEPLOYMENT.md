@@ -88,4 +88,4 @@ Copy this file to `/etc/cloudflared/config.yml` (or similar) on your server host
 cloudflared tunnel --config /etc/cloudflared/config.yml run
 ```
 
-This setup forces all connections over WSS (secured by Cloudflare's TLS edge certificates) and strictly forwards them to the server listening on `127.0.0.1:8080`, keeping all other machine ports closed to the WAN.
+This setup forces all connections over WSS (secured by Cloudflare's TLS edge certificates) and strictly forwards them to the server listening on `127.0.0.1:18085`, keeping all other machine ports closed to the WAN.

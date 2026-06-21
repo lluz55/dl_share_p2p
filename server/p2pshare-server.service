@@ -8,7 +8,7 @@ User=p2pshare
 Group=p2pshare
 WorkingDirectory=/var/lib/p2pshare
 Environment="ALLOWED_ORIGINS=https://your-frontend.pages.dev"
-ExecStart=/usr/local/bin/p2pshare-server -port 8080
+ExecStart=/usr/local/bin/p2pshare-server -port 18085
 Restart=on-failure
 RestartSec=5s
 

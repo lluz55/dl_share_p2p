@@ -1,5 +1,5 @@
 # Cloudflare Tunnel Configuration Template
-# Exposes ONLY the local Go signaling server port (default 8080) over WSS.
+# Exposes ONLY the local Go signaling server port (default 18085) over WSS.
 # Nothing else on the machine is exposed to the internet.
 
 tunnel: <YOUR_TUNNEL_UUID>
@@ -8,7 +8,7 @@ credentials-file: /home/lluz/.cloudflared/<YOUR_TUNNEL_UUID>.json
 ingress:
   # Map your public signaling hostname to the local loopback server
   - hostname: signal.yourdomain.com
-    service: http://127.0.0.1:8080
+    service: http://127.0.0.1:18085
     originRequest:
       noTLSVerify: true
   # Catch-all rule: reject all other requests with 404
