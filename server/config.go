@@ -42,8 +42,8 @@ func DefaultConfig() Config {
 		RoomTTL:            30 * time.Minute,
 		ConnRateLimitRate:  2.0, // 2 connections per second per IP
 		ConnRateLimitBurst: 10,
-		MsgRateLimitRate:   5.0, // 5 signaling messages per second per connection
-		MsgRateLimitBurst:  10,
+		MsgRateLimitRate:   200.0, // 200 signaling messages per second per connection
+		MsgRateLimitBurst:  400,
 	}
 }
 

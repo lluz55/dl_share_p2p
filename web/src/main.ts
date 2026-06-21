@@ -13,6 +13,11 @@ const createRoomBtn = document.getElementById("create-room-btn") as HTMLButtonEl
 const joinRoomInput = document.getElementById("join-room-input") as HTMLInputElement;
 const joinRoomBtn = document.getElementById("join-room-btn") as HTMLButtonElement;
 
+// Force input text to always be lowercase
+joinRoomInput.addEventListener("input", () => {
+  joinRoomInput.value = joinRoomInput.value.toLowerCase();
+});
+
 const roomCodeText = document.getElementById("room-code-text")!;
 const copyCodeBtn = document.getElementById("copy-code-btn") as HTMLButtonElement;
 const copyLinkBtn = document.getElementById("copy-link-btn") as HTMLButtonElement;
@@ -217,12 +222,12 @@ function parseRoomCodeFromUrlOrString(input: string): string | null {
     const url = new URL(input);
     const params = new URLSearchParams(url.search);
     const room = params.get("room");
-    if (room) return room.trim();
+    if (room) return room.trim().toLowerCase();
   } catch (e) {
     // Not a URL
   }
   
-  const clean = input.trim();
+  const clean = input.trim().toLowerCase();
   if (clean.split("-").length === 3) {
     return clean;
   }
@@ -317,7 +322,7 @@ createRoomBtn.addEventListener("click", () => {
 
 // Join Room Action
 joinRoomBtn.addEventListener("click", () => {
-  const code = joinRoomInput.value.trim();
+  const code = joinRoomInput.value.trim().toLowerCase();
   if (!code) {
     showError("Please enter a valid room code.");
     return;
@@ -621,11 +626,12 @@ window.addEventListener("DOMContentLoaded", () => {
   const params = new URLSearchParams(window.location.search);
   const room = params.get("room");
   if (room) {
-    joinRoomInput.value = room.trim();
+    const cleanRoom = room.trim().toLowerCase();
+    joinRoomInput.value = cleanRoom;
     // Auto-join the room
     clearError();
     signaling.onOpen = () => {
-      signaling.joinRoom(room);
+      signaling.joinRoom(cleanRoom);
     };
     signaling.connect();
   }
