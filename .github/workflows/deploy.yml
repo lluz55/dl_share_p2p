@@ -40,7 +40,9 @@ jobs:
         working-directory: web
 
       - name: Decrypt signaling URL with SOPS
-        if: ${{ secrets.SOPS_AGE_KEY != '' }}
+        env:
+          SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
+        if: env.SOPS_AGE_KEY != ''
         run: |
           # Install SOPS
           curl -Lo sops https://github.com/getsops/sops/releases/download/v3.8.1/sops-v3.8.1.linux.amd64
