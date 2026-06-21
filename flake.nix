@@ -85,6 +85,23 @@
             exec ${pkgs.nodejs}/bin/node --experimental-strip-types build.ts "$@"
           '';
 
+          server-run = pkgs.writeShellScriptBin "p2pshare-server-run" ''
+            if [ ! -f "secrets/secrets.yaml" ]; then
+              echo "Error: secrets/secrets.yaml not found." >&2
+              echo "Please create a secrets/secrets.yaml file encrypted with SOPS." >&2
+              exit 1
+            fi
+            echo "Decrypting Allowed Origins using SOPS..."
+            ORIGINS=$(${pkgs.sops}/bin/sops --decrypt --extract '["allowed-origins"]' secrets/secrets.yaml)
+            if [ -z "$ORIGINS" ]; then
+              echo "Error: allowed-origins not found in secrets.yaml" >&2
+              exit 1
+            fi
+            echo "Starting Go Signaling Server..."
+            export ALLOWED_ORIGINS="$ORIGINS"
+            exec "${server}/bin/p2pshare-server" "$@"
+          '';
+
           tunnel-run = pkgs.writeShellScriptBin "p2pshare-tunnel-run" ''
             if [ ! -f "secrets/secrets.yaml" ]; then
               echo "Error: secrets/secrets.yaml not found." >&2
