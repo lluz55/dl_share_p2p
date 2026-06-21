@@ -42,8 +42,11 @@ jobs:
       - name: Decrypt signaling URL with SOPS
         env:
           SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
-        if: secrets.SOPS_AGE_KEY != ''
         run: |
+          if [ -z "$SOPS_AGE_KEY" ]; then
+            echo "SOPS_AGE_KEY is not configured. Skipping SOPS decryption."
+            exit 0
+          fi
           # Install SOPS
           curl -Lo sops https://github.com/getsops/sops/releases/download/v3.8.1/sops-v3.8.1.linux.amd64
           chmod +x sops
@@ -51,7 +54,7 @@ jobs:
 
           # Decrypt signaling URL using private age key from repository secrets
           mkdir -p ~/.config/sops/age
-          echo "${{ secrets.SOPS_AGE_KEY }}" > ~/.config/sops/age/keys.txt
+          echo "$SOPS_AGE_KEY" > ~/.config/sops/age/keys.txt
           SIGNALING_URL=$(sops --decrypt --extract '["cloudflare-tunnel-url"]' secrets/secrets.yaml)
           echo "SIGNALING_URL=$SIGNALING_URL" >> $GITHUB_ENV
 
