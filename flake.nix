@@ -84,6 +84,22 @@
             echo "Building frontend locally..."
             exec ${pkgs.nodejs}/bin/node --experimental-strip-types build.ts "$@"
           '';
+
+          tunnel-run = pkgs.writeShellScriptBin "p2pshare-tunnel-run" ''
+            if [ ! -f "secrets/secrets.yaml" ]; then
+              echo "Error: secrets/secrets.yaml not found." >&2
+              echo "Please create a secrets/secrets.yaml file encrypted with SOPS." >&2
+              exit 1
+            fi
+            echo "Decrypting Cloudflare Tunnel Token using SOPS..."
+            TOKEN=$(${pkgs.sops}/bin/sops --decrypt --extract '["cloudflare-tunnel-token"]' secrets/secrets.yaml)
+            if [ -z "$TOKEN" ]; then
+              echo "Error: cloudflare-tunnel-token not found in secrets.yaml" >&2
+              exit 1
+            fi
+            echo "Starting Cloudflare Tunnel persistent instance..."
+            exec ${pkgs.cloudflared}/bin/cloudflared tunnel run --token "$TOKEN"
+          '';
         };
 
         devShells.default = pkgs.mkShell {
@@ -92,13 +108,15 @@
             pkgs.nodejs
             pkgs.typescript
             pkgs.cloudflared
+            pkgs.sops
           ];
 
           shellHook = ''
             echo "p2pshare dev shell"
-            echo "  go      $(go version)"
-            echo "  node    $(node --version)"
+            echo "  go          $(go version)"
+            echo "  node        $(node --version)"
             echo "  cloudflared $(cloudflared --version 2>&1 | head -1)"
+            echo "  sops        $(sops --version)"
           '';
         };
       }) // {
