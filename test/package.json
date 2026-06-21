@@ -1,0 +1,8 @@
+{
+  "name": "p2pshare-e2e",
+  "version": "0.1.0",
+  "type": "module",
+  "dependencies": {
+    "puppeteer-core": "^23.0.0"
+  }
+}

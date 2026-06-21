@@ -2,9 +2,13 @@ result
 result-*
 
 server/p2pshare
+server/p2pshare-server
 
 web/node_modules/
 web/dist/
+
+test/node_modules/
+test/screenshots/
 
 # Secrets & Credentials
 secrets/*.dec.yaml
