@@ -39,11 +39,25 @@ jobs:
         run: npm ci
         working-directory: web
 
+      - name: Decrypt signaling URL with SOPS
+        if: ${{ secrets.SOPS_AGE_KEY != '' }}
+        run: |
+          # Install SOPS
+          curl -Lo sops https://github.com/getsops/sops/releases/download/v3.8.1/sops-v3.8.1.linux.amd64
+          chmod +x sops
+          sudo mv sops /usr/local/bin/
+
+          # Decrypt signaling URL using private age key from repository secrets
+          mkdir -p ~/.config/sops/age
+          echo "${{ secrets.SOPS_AGE_KEY }}" > ~/.config/sops/age/keys.txt
+          SIGNALING_URL=$(sops --decrypt --extract '["cloudflare-tunnel-url"]' secrets/secrets.yaml)
+          echo "SIGNALING_URL=$SIGNALING_URL" >> $GITHUB_ENV
+
       - name: Build frontend
         run: npm run build
         working-directory: web
         env:
-          SIGNALING_URL: ${{ secrets.SIGNALING_URL || vars.SIGNALING_URL }}
+          SIGNALING_URL: ${{ env.SIGNALING_URL || secrets.SIGNALING_URL || vars.SIGNALING_URL }}
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
