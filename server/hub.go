@@ -373,7 +373,7 @@ func (h *Hub) HandleRelayRequest(senderID string, msg *Message) {
 		return
 	}
 	room, exists := h.rooms[sender.RoomCode]
-	if !exists || sender.Role != "host" {
+	if !exists {
 		h.mu.Unlock()
 		return
 	}

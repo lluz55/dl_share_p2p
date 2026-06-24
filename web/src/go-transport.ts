@@ -64,6 +64,12 @@ export class GoTransport implements Transport {
     this.signaling.onJoined = (data) => {
       this.selfId = data.self;
       this.peers.handleJoined(data.self, data.role);
+      for (const peerId of data.peers) {
+        if (data.self < peerId) {
+          this.peers.handlePeerJoined(peerId);
+        }
+        this.events.onPeerState?.(peerId, "connecting");
+      }
     };
     this.signaling.onPeerJoined = (peerId) => {
       this.peers.handlePeerJoined(peerId);
@@ -161,7 +167,7 @@ export class GoTransport implements Transport {
       case "failed": {
         this.relayMode.add(peerId);
         this.events.onActivePath?.("Server relay (NAT)");
-        this.events.onPeerState?.(peerId, this.role === "host" ? "connected" : "connecting");
+        this.events.onPeerState?.(peerId, "connected");
         break;
       }
       case "disconnected":
@@ -175,11 +181,7 @@ export class GoTransport implements Transport {
   }
 
   private handleDataChannel(peerId: string, channel: RTCDataChannel): void {
-    if (this.role === "host") {
-      this.channels.set(peerId, channel);
-      return;
-    }
-    // Guest: receive the file the host sends over the direct channel (DTLS encrypted).
+    this.channels.set(peerId, channel);
     const receiver = new FileReceiver(channel);
     receiver.onProgress = (received, total) =>
       this.events.onReceiveProgress?.(received, total, progressMeta(total));

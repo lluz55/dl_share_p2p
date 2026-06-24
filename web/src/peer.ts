@@ -24,9 +24,9 @@ export class PeerConnectionManager {
     this.role = role;
   }
 
-  /** Called by main.ts when a peer joins. Host initiates WebRTC. */
+  /** Called by main.ts when a peer joins. Initiates connection if selfId < peerId. */
   public handlePeerJoined(peerId: string): void {
-    if (this.role === "host") {
+    if (this.selfId && this.selfId < peerId) {
       void this.initiateConnection(peerId);
     }
   }

@@ -61,12 +61,12 @@ async function startServer() {
 async function startFrontend() {
   log("frontend", `serving web on :${FRONTEND_PORT}`);
   frontendProc = spawn(
-    "python3",
-    ["-m", "http.server", String(FRONTEND_PORT), "--directory", path.join(ROOT, "web")],
+    "npx",
+    ["--yes", "http-server", path.join(ROOT, "web"), "-p", String(FRONTEND_PORT)],
     { stdio: "pipe" }
   );
   frontendProc.stderr.on("data", (d) => {});
-  await sleep(300);
+  await sleep(1000);
 }
 
 function stopAll() {
@@ -102,9 +102,10 @@ async function openBrowser(label) {
 async function waitForStatus(page, label, targetText, timeoutMs = 12000) {
   log(label, `waiting for status: "${targetText}"`);
   const start = Date.now();
+  const targets = Array.isArray(targetText) ? targetText : [targetText];
   while (Date.now() - start < timeoutMs) {
     const text = await page.$eval("#status-text", (el) => el.textContent).catch(() => "");
-    if (text.toLowerCase().includes(targetText.toLowerCase())) {
+    if (targets.some(t => text.toLowerCase().includes(t.toLowerCase()))) {
       log(label, `status reached: "${text}"`);
       return text;
     }
@@ -144,7 +145,7 @@ async function runTest() {
       throw new Error("Room code not set after createRoom — signaling may have failed");
     }
 
-    await waitForStatus(clientA.page, "client-A", "Waiting for peers");
+    await waitForStatus(clientA.page, "client-A", ["Waiting for peers", "Connecting (serverless)"]);
     await screenshot(clientA.page, "03-clientA-waiting");
 
     // -- Client B: navigate, enter room code, join

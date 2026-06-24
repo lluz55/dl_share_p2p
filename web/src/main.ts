@@ -108,7 +108,7 @@ function updateStatusBadge(state: "waiting" | "connecting" | "connected" | "fail
 
 // Host connection state helper
 function updateHostGlobalStatus(): void {
-  if (role !== "host") return;
+  if (!role) return;
   const connectedCount = Array.from(activeGuests.values()).filter(g => g.state === "connected").length;
   if (connectedCount > 0) {
     updateStatusBadge("connected", `Connected (${connectedCount} peer${connectedCount > 1 ? "s" : ""})`);
@@ -124,7 +124,7 @@ function updateHostGlobalStatus(): void {
 
 // Render dynamic list of peers (1-to-n)
 function renderPeersList(): void {
-  if (role !== "host") {
+  if (!role) {
     peersSection.style.display = "none";
     return;
   }
@@ -133,7 +133,7 @@ function renderPeersList(): void {
   peersList.innerHTML = "";
 
   if (activeGuests.size === 0) {
-    peersList.innerHTML = `<div class="waiting-placeholder">No peers connected yet. Share the code above to allow guests to join.</div>`;
+    peersList.innerHTML = `<div class="waiting-placeholder">No peers connected yet.</div>`;
     return;
   }
 
@@ -396,16 +396,11 @@ orchestrator.onReady = (joinedRole, code) => {
   lobbySection.classList.remove("active");
   roomSection.classList.add("active");
 
-  if (role === "host") {
-    senderFlow.style.display = "block";
-    receiverFlow.style.display = "none";
-    peersSection.style.display = "block";
-    renderPeersList();
-  } else {
-    senderFlow.style.display = "none";
-    receiverFlow.style.display = "block";
-    peersSection.style.display = "none";
-  }
+  // Always show the sender flow and peers list for both hosts and guests.
+  senderFlow.style.display = "block";
+  peersSection.style.display = "block";
+  receiverFlow.style.display = "none";
+  renderPeersList();
 
   updateStatusBadge("waiting", "Waiting for peers...");
 };
@@ -413,43 +408,22 @@ orchestrator.onReady = (joinedRole, code) => {
 orchestrator.onPeerState = (peerId, state) => {
   console.log(`Peer ${peerId} state: ${state}`);
 
-  if (role === "host") {
-    if (state === "closed") {
-      activeGuests.delete(peerId);
-    } else {
-      const info = activeGuests.get(peerId);
-      if (info) {
-        info.state = state;
-      } else {
-        activeGuests.set(peerId, { state, bytesSent: 0, totalBytes: 0 });
-      }
-    }
-    renderPeersList();
-    updateHostGlobalStatus();
-    updateSenderUI();
+  if (state === "closed") {
+    activeGuests.delete(peerId);
   } else {
-    // Guest: single remote peer (the host).
-    switch (state) {
-      case "connecting":
-        updateStatusBadge("connecting", "Connecting…");
-        break;
-      case "connected":
-        updateStatusBadge("connected", "Connected");
-        break;
-      case "failed":
-        updateStatusBadge("failed", "Connection failed.");
-        showError("Could not connect to the host.");
-        break;
-      case "closed":
-        updateStatusBadge("waiting", "Waiting for peers...");
-        progressContainer.style.display = "none";
-        break;
+    const info = activeGuests.get(peerId);
+    if (info) {
+      info.state = state;
+    } else {
+      activeGuests.set(peerId, { state, bytesSent: 0, totalBytes: 0 });
     }
   }
+  renderPeersList();
+  updateHostGlobalStatus();
+  updateSenderUI();
 };
 
 orchestrator.onSendProgress = (peerId, sentBytes, totalBytes) => {
-  if (role !== "host") return;
   const info = activeGuests.get(peerId);
   if (!info) return;
   info.bytesSent = sentBytes;
@@ -591,33 +565,43 @@ scanQrBtn.addEventListener("click", () => {
 
   html5QrCode = new Html5Qrcode("scanner-preview");
   scannerActive = true;
-  html5QrCode.start(
-    { facingMode: "environment" },
-    {
-      fps: 10,
-      qrbox: { width: 220, height: 220 }
-    },
-    (decodedText) => {
-      const code = parseRoomCodeFromUrlOrString(decodedText);
-      if (code) {
-        stopScanner().then(() => {
-          scannerModal.classList.remove("active");
-          joinRoomInput.value = code;
-          // Connect to the room automatically
-          clearError();
-          orchestrator.joinRoom(code);
-        });
+
+  Html5Qrcode.getCameras()
+    .then(devices => {
+      let cameraSelection: string | MediaTrackConstraints = { facingMode: "environment" };
+      if (devices && devices.length > 0) {
+        cameraSelection = devices[0].id;
       }
-    },
-    () => {
-      // Silent error handler (called for every frame scanned without QR code)
-    }
-  ).catch(err => {
-    console.error("Failed to start QR scanner", err);
-    scannerError.textContent = "Could not access camera. Please check permissions.";
-    scannerError.style.display = "block";
-    scannerActive = false;
-  });
+      if (!html5QrCode) return;
+      return html5QrCode.start(
+        cameraSelection,
+        {
+          fps: 10,
+          qrbox: { width: 220, height: 220 }
+        },
+        (decodedText) => {
+          const code = parseRoomCodeFromUrlOrString(decodedText);
+          if (code) {
+            stopScanner().then(() => {
+              scannerModal.classList.remove("active");
+              joinRoomInput.value = code;
+              // Connect to the room automatically
+              clearError();
+              orchestrator.joinRoom(code);
+            });
+          }
+        },
+        () => {
+          // Silent error handler (called for every frame scanned without QR code)
+        }
+      );
+    })
+    .catch(err => {
+      console.error("Failed to start QR scanner", err);
+      scannerError.textContent = "Could not access camera. Please check permissions.";
+      scannerError.style.display = "block";
+      scannerActive = false;
+    });
 });
 
 // Close Scanner Action
