@@ -35,6 +35,7 @@ type RelayManager struct {
 	maxSessions  int
 	tokenTimeout time.Duration
 	logger       *slog.Logger
+	relayLimiter *IPRateLimiter
 }
 
 // NewRelayManager creates a new RelayManager.
@@ -44,7 +45,13 @@ func NewRelayManager(logger *slog.Logger) *RelayManager {
 		maxSessions:  5,                // Max concurrent active relay sessions globally
 		tokenTimeout: 30 * time.Second, // Token validity period
 		logger:       logger,
+		relayLimiter: NewIPRateLimiter(2.0, 10), // Limit relay connection requests to 2 per second, burst 10
 	}
+}
+
+// Prune cleans up rate limiter state for inactive IPs.
+func (rm *RelayManager) Prune() {
+	rm.relayLimiter.Prune(1 * time.Hour)
 }
 
 // CreateSession generates a secure token and approves a new relay session.
@@ -85,7 +92,7 @@ func (rm *RelayManager) CreateSession(roomCode, hostID, guestID string) (string,
 		}
 	}()
 
-	rm.logger.Info("relay session approved", "token", token, "room", roomCode, "host", hostID, "guest", guestID)
+	rm.logger.Info("relay session approved", "via", "go-server-relay", "token", token, "room", roomCode, "host", hostID, "guest", guestID)
 	return token, nil
 }
 
@@ -112,13 +119,13 @@ func (rm *RelayManager) ConnectPeer(token, peerID string, conn *websocket.Conn) 
 			return nil, errors.New("host already connected to relay")
 		}
 		session.HostConn = conn
-		rm.logger.Info("relay host connected", "token", token)
+		rm.logger.Info("relay host connected", "via", "go-server-relay", "token", token)
 	} else if peerID == session.GuestID {
 		if session.GuestConn != nil {
 			return nil, errors.New("guest already connected to relay")
 		}
 		session.GuestConn = conn
-		rm.logger.Info("relay guest connected", "token", token)
+		rm.logger.Info("relay guest connected", "via", "go-server-relay", "token", token)
 	} else {
 		return nil, errors.New("unauthorized peer ID for this relay token")
 	}
@@ -137,7 +144,7 @@ func (rm *RelayManager) ConnectPeer(token, peerID string, conn *websocket.Conn) 
 
 // runBridge handles streaming and limits enforcement.
 func (rm *RelayManager) runBridge(s *ApprovedRelay) {
-	rm.logger.Info("starting relay bridge", "room", s.RoomCode, "host", s.HostID, "guest", s.GuestID)
+	rm.logger.Info("starting relay bridge (data via Go server)", "via", "go-server-relay", "room", s.RoomCode, "host", s.HostID, "guest", s.GuestID)
 
 	defer func() {
 		s.HostConn.Close()
@@ -212,7 +219,7 @@ func (rm *RelayManager) runBridge(s *ApprovedRelay) {
 		if err != nil {
 			rm.logger.Warn("relay transfer failed", "room", s.RoomCode, "err", err)
 		} else {
-			rm.logger.Info("relay transfer completed successfully", "room", s.RoomCode, "bytes", bytesTransmitted)
+			rm.logger.Info("relay transfer completed successfully", "via", "go-server-relay", "room", s.RoomCode, "bytes", bytesTransmitted)
 		}
 	case <-timeoutTimer.C:
 		rm.logger.Warn("relay transfer timed out", "room", s.RoomCode)
@@ -220,12 +227,29 @@ func (rm *RelayManager) runBridge(s *ApprovedRelay) {
 }
 
 // ServeRelay handles HTTP upgrades to the /relay WebSocket route.
-func ServeRelay(rm *RelayManager, w http.ResponseWriter, r *http.Request, logger *slog.Logger) {
+func ServeRelay(rm *RelayManager, allowedOrigins []string, w http.ResponseWriter, r *http.Request, logger *slog.Logger) {
 	token := r.URL.Query().Get("token")
 	peerID := r.URL.Query().Get("peerId")
 
 	if token == "" || peerID == "" {
 		http.Error(w, "Missing query parameters", http.StatusBadRequest)
+		return
+	}
+
+	ip := getClientIP(r)
+
+	// 1. Rate Limit relay connections
+	if !rm.relayLimiter.Allow(ip) {
+		logger.Warn("relay rate limit exceeded", "ip", ip, "peer", peerID)
+		http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
+		return
+	}
+
+	// 2. Reject unauthorized origins (CSWSH safeguard)
+	origin := r.Header.Get("Origin")
+	if !checkOrigin(allowedOrigins, origin, logger) {
+		logger.Warn("relay origin not allowed", "origin", origin, "ip", ip, "peer", peerID)
+		http.Error(w, "Forbidden Origin", http.StatusForbidden)
 		return
 	}
 
@@ -235,6 +259,8 @@ func ServeRelay(rm *RelayManager, w http.ResponseWriter, r *http.Request, logger
 		logger.Error("relay upgrade failed", "err", err, "peer", peerID)
 		return
 	}
+
+	logger.Info("relay socket opened (data via Go server)", "via", "go-server-relay", "peer", peerID)
 
 	_, err = rm.ConnectPeer(token, peerID, conn)
 	if err != nil {

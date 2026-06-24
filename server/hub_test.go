@@ -72,7 +72,7 @@ func TestIPRateLimiter(t *testing.T) {
 func TestHubJoinLeave(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	config := DefaultConfig()
-	hub := NewHub(logger, config, NewRelayManager(logger))
+	hub := NewHub(logger, config, NewRelayManager(logger), nil)
 
 	peerHost := &Peer{ID: "host-1", IP: "127.0.0.1", Send: make(chan []byte, 10)}
 	peerGuest := &Peer{ID: "guest-1", IP: "127.0.0.1", Send: make(chan []byte, 10)}
@@ -143,7 +143,7 @@ func TestHubJoinLeave(t *testing.T) {
 func TestHostChosenRoomCode(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	config := DefaultConfig()
-	hub := NewHub(logger, config, NewRelayManager(logger))
+	hub := NewHub(logger, config, NewRelayManager(logger), nil)
 
 	host := &Peer{ID: "host-1", IP: "127.0.0.1", Send: make(chan []byte, 10)}
 	guest := &Peer{ID: "guest-1", IP: "127.0.0.2", Send: make(chan []byte, 10)}
@@ -183,7 +183,7 @@ func TestConnectionCaps(t *testing.T) {
 	config.MaxGlobalConns = 2
 	config.MaxIPConns = 1
 
-	hub := NewHub(logger, config, NewRelayManager(logger))
+	hub := NewHub(logger, config, NewRelayManager(logger), nil)
 
 	p1 := &Peer{ID: "p1", IP: "1.1.1.1", Send: make(chan []byte, 10)}
 	p2 := &Peer{ID: "p2", IP: "1.1.1.1", Send: make(chan []byte, 10)}
@@ -213,7 +213,7 @@ func TestConnectionCaps(t *testing.T) {
 func TestRoutingIsolation(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	config := DefaultConfig()
-	hub := NewHub(logger, config, NewRelayManager(logger))
+	hub := NewHub(logger, config, NewRelayManager(logger), nil)
 
 	h1 := &Peer{ID: "h1", IP: "127.0.0.1", Send: make(chan []byte, 10)}
 	g1 := &Peer{ID: "g1", IP: "127.0.0.1", Send: make(chan []byte, 10)}
@@ -266,6 +266,103 @@ func TestRoutingIsolation(t *testing.T) {
 	err = hub.RouteMessage("h1", badMsg)
 	if err == nil {
 		t.Error("expected error when routing across room boundaries, got nil")
+	}
+}
+
+func TestAuthManagerLoginAndExpiry(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	store, err := NewPasswordStore("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	salt := "salt"
+	_ = store.Add(PasswordRecord{ID: "p1", Salt: salt, Hash: hashSecret("secret", salt), CreatedAt: time.Now()})
+	am := NewAuthManager(logger, store, 50*time.Millisecond)
+
+	if _, _, ok := am.Login("wrong"); ok {
+		t.Error("expected wrong password to be rejected")
+	}
+	tok, _, ok := am.Login("secret")
+	if !ok {
+		t.Fatal("expected correct password to succeed")
+	}
+	if !am.Validate(tok) {
+		t.Error("expected freshly issued token to validate")
+	}
+
+	time.Sleep(60 * time.Millisecond)
+	if am.Validate(tok) {
+		t.Error("expected token to expire after its TTL")
+	}
+
+	// One-time password is consumed on first use; second login must fail.
+	store2, _ := NewPasswordStore("")
+	_ = store2.Add(PasswordRecord{ID: "otp", Salt: "salt", Hash: hashSecret("otp-secret", "salt"), OneTime: true, CreatedAt: time.Now()})
+	am2 := NewAuthManager(logger, store2, time.Hour)
+	if _, _, ok := am2.Login("otp-secret"); !ok {
+		t.Fatal("expected one-time password login to succeed")
+	}
+	if _, _, ok := am2.Login("otp-secret"); ok {
+		t.Error("expected one-time password to be consumed after first use")
+	}
+}
+
+func TestRelayRequestRequiresAuth(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	config := DefaultConfig()
+	authStore, _ := NewPasswordStore("")
+	salt := "salt"
+	_ = authStore.Add(PasswordRecord{ID: "p1", Salt: salt, Hash: hashSecret("test-pass", salt), CreatedAt: time.Now()})
+	auth := NewAuthManager(logger, authStore, time.Hour)
+	hub := NewHub(logger, config, NewRelayManager(logger), auth)
+
+	host := &Peer{ID: "host-1", IP: "127.0.0.1", Send: make(chan []byte, 10)}
+	guest := &Peer{ID: "guest-1", IP: "127.0.0.2", Send: make(chan []byte, 10)}
+	_ = hub.RegisterPeer(host)
+	_ = hub.RegisterPeer(guest)
+
+	room, err := hub.JoinOrCreateRoom(host, "", false)
+	if err != nil {
+		t.Fatalf("create room failed: %v", err)
+	}
+	if _, err := hub.JoinOrCreateRoom(guest, room.Code, false); err != nil {
+		t.Fatalf("guest join failed: %v", err)
+	}
+	// Drain the peer-joined notification delivered to the host.
+	<-host.Send
+
+	// 1. Without a valid auth token, the relay request is denied.
+	hub.HandleRelayRequest(host.ID, &Message{Type: "relay-request", To: guest.ID})
+	select {
+	case data := <-host.Send:
+		var m Message
+		_ = json.Unmarshal(data, &m)
+		if m.Type != "error" || m.Reason != "login-required" {
+			t.Errorf("expected login-required error, got type=%s reason=%s", m.Type, m.Reason)
+		}
+	default:
+		t.Fatal("host did not receive login-required error")
+	}
+
+	// 2. With a valid token, both peers receive relay-approved with a token.
+	token, _, ok := auth.Login("test-pass")
+	if !ok {
+		t.Fatal("login with correct password failed")
+	}
+	hub.HandleRelayRequest(host.ID, &Message{Type: "relay-request", To: guest.ID, Auth: token})
+
+	for _, p := range []*Peer{host, guest} {
+		select {
+		case data := <-p.Send:
+			var m Message
+			_ = json.Unmarshal(data, &m)
+			if m.Type != "relay-approved" || m.Token == "" {
+				t.Errorf("expected relay-approved with token for %s, got type=%s", p.ID, m.Type)
+			}
+		default:
+			t.Errorf("%s did not receive relay-approved", p.ID)
+		}
 	}
 }
 

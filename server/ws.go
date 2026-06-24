@@ -138,7 +138,7 @@ func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request, logger *slog.Logg
 		return
 	}
 
-	c.logger.Info("peer registered")
+	c.logger.Info("connection via Go signaling server", "via", "go-server")
 
 	// 4. Handshake Timeout
 	go func() {
@@ -288,7 +288,6 @@ func (c *connection) readPump() {
 				if err := c.hub.RouteMessage(c.peer.ID, &msg); err != nil {
 					c.logger.Warn("routing message failed", "type", msg.Type, "err", err)
 					c.sendError(err.Error())
-					break
 				}
 			}
 		}

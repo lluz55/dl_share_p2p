@@ -24,6 +24,7 @@ type Message struct {
 	SDP       json.RawMessage `json:"sdp,omitempty"`
 	Candidate json.RawMessage `json:"candidate,omitempty"`
 	Token     string          `json:"token,omitempty"`
+	Auth      string          `json:"auth,omitempty"` // login session token (relay-request only)
 }
 
 // Hub maintains the state of rooms and active peer connections.
@@ -36,12 +37,14 @@ type Hub struct {
 	config       Config
 	connLimiter  *IPRateLimiter
 	relayManager *RelayManager
+	authManager  *AuthManager
 	logger       *slog.Logger
 	shutdownChan chan struct{}
 }
 
-// NewHub creates and starts a new Hub.
-func NewHub(logger *slog.Logger, config Config, relayManager *RelayManager) *Hub {
+// NewHub creates and starts a new Hub. authManager may be nil in tests that do
+// not exercise the relay; when nil, relay auth enforcement is skipped.
+func NewHub(logger *slog.Logger, config Config, relayManager *RelayManager, authManager *AuthManager) *Hub {
 	h := &Hub{
 		rooms:        make(map[string]*Room),
 		peers:        make(map[string]*Peer),
@@ -50,6 +53,7 @@ func NewHub(logger *slog.Logger, config Config, relayManager *RelayManager) *Hub
 		config:       config,
 		connLimiter:  NewIPRateLimiter(config.ConnRateLimitRate, config.ConnRateLimitBurst),
 		relayManager: relayManager,
+		authManager:  authManager,
 		logger:       logger,
 		shutdownChan: make(chan struct{}),
 	}
@@ -66,6 +70,12 @@ func (h *Hub) StartReaper(ctx context.Context) {
 			case <-ticker.C:
 				h.ReapRooms()
 				h.connLimiter.Prune(1 * time.Hour)
+				if h.authManager != nil {
+					h.authManager.Prune()
+				}
+				if h.relayManager != nil {
+					h.relayManager.Prune()
+				}
 			case <-ctx.Done():
 				return
 			case <-h.shutdownChan:
@@ -372,11 +382,28 @@ func (h *Hub) HandleRelayRequest(senderID string, msg *Message) {
 	}
 	h.mu.Unlock()
 
+	// Relay (data through the Go server) requires a prior login: the host must
+	// present a valid session token obtained from /login (SPEC §4.3, relay only).
+	if h.authManager != nil && !h.authManager.Validate(msg.Auth) {
+		h.logger.Warn("relay request denied: not authenticated",
+			"via", "go-server-relay", "host", sender.ID, "room", room.Code)
+		errMsg := Message{Type: "error", Reason: "login-required"}
+		data, _ := json.Marshal(errMsg)
+		select {
+		case sender.Send <- data:
+		default:
+		}
+		return
+	}
+
 	// If relayManager is not set (e.g. in tests), reject request
 	if h.relayManager == nil {
 		h.logger.Warn("relay requested but relayManager is not initialized")
 		return
 	}
+
+	h.logger.Info("relay request authorized",
+		"via", "go-server-relay", "room", room.Code, "host", sender.ID, "guest", recipient.ID)
 
 	// Create relay session
 	token, err := h.relayManager.CreateSession(room.Code, sender.ID, recipient.ID)
