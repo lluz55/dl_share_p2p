@@ -14,6 +14,15 @@ export interface RelayRequestMessage {
   to: string;
   // Login session token; the server only brokers the relay when this is valid.
   auth?: string;
+  // Host's ephemeral ECDH P-256 public key (base64 raw) for E2E key exchange.
+  key?: string;
+}
+
+export interface RelayKeyMessage {
+  type: "relay-key";
+  to: string;
+  // Sender's ephemeral ECDH P-256 public key (base64 raw).
+  key: string;
 }
 
 export interface OfferMessage {
@@ -42,7 +51,8 @@ export type OutboundMessage =
   | OfferMessage
   | AnswerMessage
   | IceMessage
-  | RelayRequestMessage;
+  | RelayRequestMessage
+  | RelayKeyMessage;
 
 export interface JoinedMessage {
   type: "joined";
@@ -91,6 +101,14 @@ export interface RelayApprovedMessage {
   token: string;
   to: string;
   from: string;
+  // Host's ECDH public key forwarded by the server (only present on guest side).
+  key?: string;
+}
+
+export interface InboundRelayKeyMessage {
+  type: "relay-key";
+  from: string;
+  key: string;
 }
 
 export type InboundMessage =
@@ -101,7 +119,8 @@ export type InboundMessage =
   | InboundOfferMessage
   | InboundAnswerMessage
   | InboundIceMessage
-  | RelayApprovedMessage;
+  | RelayApprovedMessage
+  | InboundRelayKeyMessage;
 
 // Handlers for client consumers
 export type OpenHandler = () => void;
@@ -111,7 +130,8 @@ export type PeerLeftHandler = (peerId: string) => void;
 export type OfferHandler = (from: string, sdp: unknown) => void;
 export type AnswerHandler = (from: string, sdp: unknown) => void;
 export type IceHandler = (from: string, candidate: unknown) => void;
-export type RelayApprovedHandler = (token: string, from: string, to: string) => void;
+export type RelayApprovedHandler = (token: string, from: string, to: string, key?: string) => void;
+export type RelayKeyHandler = (from: string, key: string) => void;
 export type ErrorHandler = (reason: string) => void;
 export type CloseHandler = () => void;
 
@@ -132,6 +152,7 @@ export class SignalingClient {
   public onAnswer?: AnswerHandler;
   public onIce?: IceHandler;
   public onRelayApproved?: RelayApprovedHandler;
+  public onRelayKey?: RelayKeyHandler;
   public onError?: ErrorHandler;
   public onClose?: CloseHandler;
 
@@ -260,7 +281,10 @@ export class SignalingClient {
           if (this.onIce) this.onIce(msg.from, msg.candidate);
           break;
         case "relay-approved":
-          if (this.onRelayApproved) this.onRelayApproved(msg.token, msg.from, msg.to);
+          if (this.onRelayApproved) this.onRelayApproved(msg.token, msg.from, msg.to, msg.key);
+          break;
+        case "relay-key":
+          if (this.onRelayKey) this.onRelayKey(msg.from, msg.key);
           break;
         case "error":
           if (this.onError) this.onError(msg.reason);
@@ -308,9 +332,17 @@ export class SignalingClient {
   /**
    * Ask the server to set up an authenticated data relay session with a peer
    * (SPEC §4.3). Only valid for the host. The server replies with relay-approved.
+   * key is the host's ephemeral ECDH public key (base64) for E2E key exchange.
    */
-  public sendRelayRequest(to: string, auth?: string): void {
-    this.send({ type: "relay-request", to, auth });
+  public sendRelayRequest(to: string, auth?: string, key?: string): void {
+    this.send({ type: "relay-request", to, auth, key });
+  }
+
+  /**
+   * Send an ephemeral ECDH public key to a peer for E2E relay encryption.
+   */
+  public sendRelayKey(to: string, key: string): void {
+    this.send({ type: "relay-key", to, key });
   }
 
   /**

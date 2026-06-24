@@ -3,11 +3,20 @@
 // Thin adapter that wraps the existing modules (signaling.ts, peer.ts,
 // transfer.ts) behind the Transport interface, and adds the data-relay escalation
 // (relay-transfer.ts) for when direct P2P fails because of NAT.
+//
+// Relay frames are E2E encrypted using ECDH P-256 + AES-GCM-256 (crypto.ts).
+// The server routes public keys but never sees the derived shared secret.
 
 import { SignalingClient } from "./signaling.js";
 import { PeerConnectionManager } from "./peer.js";
 import { sendFile as sendFileDirect, FileReceiver, FileMetadata } from "./transfer.js";
-import { connectRelay, sendFileOverRelay } from "./relay-transfer.js";
+import { connectRelay, sendFileOverRelay, receiveFileOverRelay } from "./relay-transfer.js";
+import {
+  generateKeyPair,
+  exportPublicKey,
+  importPublicKey,
+  deriveSharedKey,
+} from "./crypto.js";
 import * as auth from "./auth.js";
 import type { Transport, TransportEvents, TransportRole } from "./transport.js";
 
@@ -36,6 +45,18 @@ export class GoTransport implements Transport {
   private readonly relayMode = new Set<string>();
   private readonly pendingRelay = new Map<string, { resolve: (t: string) => void; reject: (e: Error) => void }>();
 
+  // Key exchange state: keyed by the remote peer ID.
+  // Host side: stores the private key and a resolver waiting for the guest's public key.
+  private readonly pendingRelayKeys = new Map<string, {
+    privateKey: CryptoKey;
+    resolve: (k: CryptoKey) => void;
+    reject: (e: Error) => void;
+  }>();
+
+  // Exported public key from the most recent prepareKeyExchange() call,
+  // consumed once by the next requestRelay() call.
+  private pendingHostPubKey: string | undefined;
+
   public start(role: TransportRole, code: string): void {
     this.role = role;
     this.code = code;
@@ -51,13 +72,14 @@ export class GoTransport implements Transport {
     this.signaling.onPeerLeft = (peerId) => {
       this.peers.handlePeerLeft(peerId);
       this.channels.delete(peerId);
+      this.pendingRelayKeys.delete(peerId);
       this.events.onPeerState?.(peerId, "closed");
     };
-    this.signaling.onRelayApproved = (token, from, to) => this.handleRelayApproved(token, from, to);
+    this.signaling.onRelayApproved = (token, from, to, key) =>
+      this.handleRelayApproved(token, from, to, key);
+    this.signaling.onRelayKey = (from, keyB64) => void this.handleRelayKey(from, keyB64);
     this.signaling.onError = (reason) => {
       if (reason === LOGIN_REQUIRED) {
-        // The session token was missing/expired when we asked for a relay. Drop
-        // it and unblock the pending request so sendFile can re-authenticate.
         auth.clear();
         this.rejectPendingRelays(new Error(LOGIN_REQUIRED));
         return;
@@ -90,12 +112,21 @@ export class GoTransport implements Transport {
     // Direct path unavailable → authenticated Go data relay (SPEC §4.3). Using
     // the server for file data requires a prior login (shared password).
     this.events.onActivePath?.("Server relay (NAT)");
-    const token = await this.requestRelayAuthenticated(peerId);
+
+    // Set up E2E key exchange before sending the relay-request so we can't
+    // miss the guest's relay-key response.
+    const { waitForSharedKey } = await this.prepareKeyExchange(peerId);
+
+    const [token, sharedKey] = await Promise.all([
+      this.requestRelayAuthenticated(peerId),
+      waitForSharedKey,
+    ]);
+
     const ws = await connectRelay(token, this.requireSelfId());
     try {
       // Give the guest a moment to attach to the relay before streaming.
       await delay(300);
-      await sendFileOverRelay(ws, file, (sent, total) =>
+      await sendFileOverRelay(ws, file, sharedKey, (sent, total) =>
         this.events.onSendProgress?.(peerId, sent, total)
       );
     } finally {
@@ -112,6 +143,10 @@ export class GoTransport implements Transport {
       pending.reject(new Error("transport closed"));
     }
     this.pendingRelay.clear();
+    for (const pending of this.pendingRelayKeys.values()) {
+      pending.reject(new Error("transport closed"));
+    }
+    this.pendingRelayKeys.clear();
   }
 
   private handlePeerState(peerId: string, state: string): void {
@@ -124,8 +159,6 @@ export class GoTransport implements Transport {
         this.events.onActivePath?.("Direct P2P (server-signaled)");
         break;
       case "failed": {
-        // Escalate to the Go data relay. Host stays sendable; the relay session
-        // is established lazily on send. Guest waits for the host to relay.
         this.relayMode.add(peerId);
         this.events.onActivePath?.("Server relay (NAT)");
         this.events.onPeerState?.(peerId, this.role === "host" ? "connected" : "connecting");
@@ -146,7 +179,7 @@ export class GoTransport implements Transport {
       this.channels.set(peerId, channel);
       return;
     }
-    // Guest: receive the file the host sends over the direct channel.
+    // Guest: receive the file the host sends over the direct channel (DTLS encrypted).
     const receiver = new FileReceiver(channel);
     receiver.onProgress = (received, total) =>
       this.events.onReceiveProgress?.(received, total, progressMeta(total));
@@ -154,12 +187,14 @@ export class GoTransport implements Transport {
     receiver.onError = (err) => this.events.onError?.(err.message);
   }
 
-  private handleRelayApproved(token: string, from: string, to: string): void {
+  // Guest side: called when relay-approved arrives with the host's public key.
+  // Generates own key pair, derives shared key, sends back public key,
+  // then opens the relay for receiving.
+  private handleRelayApproved(token: string, from: string, to: string, hostKeyB64?: string): void {
     if (to === this.selfId) {
-      // We are the guest (recipient): connect and receive over the relay.
-      void this.receiveOverRelay(token);
+      void this.receiveOverRelay(token, from, hostKeyB64);
     } else if (from === this.selfId) {
-      // We are the host (sender): unblock the pending sendFile for guest `to`.
+      // Host: relay session created — unblock the pending sendFile.
       const pending = this.pendingRelay.get(to);
       if (pending) {
         this.pendingRelay.delete(to);
@@ -168,8 +203,38 @@ export class GoTransport implements Transport {
     }
   }
 
-  private async receiveOverRelay(token: string): Promise<void> {
+  // Host side: guest sent back its ECDH public key — derive shared secret.
+  private async handleRelayKey(from: string, guestKeyB64: string): Promise<void> {
+    const pending = this.pendingRelayKeys.get(from);
+    if (!pending) return;
+    try {
+      const guestPub = await importPublicKey(guestKeyB64);
+      const sharedKey = await deriveSharedKey(pending.privateKey, guestPub);
+      pending.resolve(sharedKey);
+    } catch (err) {
+      pending.reject(err instanceof Error ? err : new Error("key derivation failed"));
+    } finally {
+      this.pendingRelayKeys.delete(from);
+    }
+  }
+
+  // Guest side: perform ECDH and start receiving over the relay.
+  private async receiveOverRelay(token: string, hostPeerId: string, hostKeyB64?: string): Promise<void> {
     this.events.onActivePath?.("Server relay (NAT)");
+
+    let sharedKey: CryptoKey;
+    try {
+      if (!hostKeyB64) throw new Error("host did not provide an ECDH public key");
+      const hostPub = await importPublicKey(hostKeyB64);
+      const { privateKey, publicKey } = await generateKeyPair();
+      sharedKey = await deriveSharedKey(privateKey, hostPub);
+      // Send guest's public key to host so host can also derive the shared key.
+      this.signaling.sendRelayKey(hostPeerId, await exportPublicKey(publicKey));
+    } catch (err) {
+      this.events.onError?.(err instanceof Error ? err.message : "key exchange failed");
+      return;
+    }
+
     let ws: WebSocket;
     try {
       ws = await connectRelay(token, this.requireSelfId());
@@ -177,17 +242,37 @@ export class GoTransport implements Transport {
       this.events.onError?.(err instanceof Error ? err.message : "relay connect failed");
       return;
     }
-    const receiver = new FileReceiver(ws);
-    receiver.onProgress = (received, total) =>
-      this.events.onReceiveProgress?.(received, total, progressMeta(total));
-    receiver.onComplete = (meta, blob) => {
-      this.events.onReceiveComplete?.(meta, blob);
-      ws.close();
-    };
-    receiver.onError = (err) => {
-      this.events.onError?.(err.message);
-      ws.close();
-    };
+
+    receiveFileOverRelay(ws, sharedKey, {
+      onProgress: (received, total) =>
+        this.events.onReceiveProgress?.(received, total, progressMeta(total)),
+      onComplete: (meta, blob) => {
+        this.events.onReceiveComplete?.(meta, blob);
+        ws.close();
+      },
+      onError: (err) => {
+        this.events.onError?.(err.message);
+        ws.close();
+      },
+    });
+  }
+
+  // Generate an ephemeral ECDH key pair and return a promise that resolves
+  // once the peer sends back its public key and the shared key is derived.
+  // Must be called before sendRelayRequest so the relay-key response can't arrive first.
+  private async prepareKeyExchange(peerId: string): Promise<{ waitForSharedKey: Promise<CryptoKey> }> {
+    const keyPair = await generateKeyPair();
+    const waitForSharedKey = new Promise<CryptoKey>((resolve, reject) => {
+      this.pendingRelayKeys.set(peerId, { privateKey: keyPair.privateKey, resolve, reject });
+      setTimeout(() => {
+        if (this.pendingRelayKeys.has(peerId)) {
+          this.pendingRelayKeys.delete(peerId);
+          reject(new Error("relay key exchange timed out"));
+        }
+      }, 15000);
+    });
+    this.pendingHostPubKey = await exportPublicKey(keyPair.publicKey);
+    return { waitForSharedKey };
   }
 
   // Obtain a relay token, ensuring we are logged in first and retrying once if
@@ -221,9 +306,11 @@ export class GoTransport implements Transport {
   }
 
   private requestRelay(peerId: string): Promise<string> {
+    const hostPubKey = this.pendingHostPubKey;
+    this.pendingHostPubKey = undefined;
     return new Promise<string>((resolve, reject) => {
       this.pendingRelay.set(peerId, { resolve, reject });
-      this.signaling.sendRelayRequest(peerId, auth.getToken() ?? undefined);
+      this.signaling.sendRelayRequest(peerId, auth.getToken() ?? undefined, hostPubKey);
       setTimeout(() => {
         if (this.pendingRelay.has(peerId)) {
           this.pendingRelay.delete(peerId);

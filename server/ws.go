@@ -181,7 +181,7 @@ func (c *connection) sendError(reason string) {
 
 func isValidMessageType(t string) bool {
 	switch t {
-	case "join", "offer", "answer", "ice", "relay-request":
+	case "join", "offer", "answer", "ice", "relay-request", "relay-key":
 		return true
 	}
 	return false

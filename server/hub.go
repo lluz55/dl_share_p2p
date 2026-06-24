@@ -25,6 +25,7 @@ type Message struct {
 	Candidate json.RawMessage `json:"candidate,omitempty"`
 	Token     string          `json:"token,omitempty"`
 	Auth      string          `json:"auth,omitempty"` // login session token (relay-request only)
+	Key       string          `json:"key,omitempty"`  // ephemeral ECDH public key (relay-key / relay-request)
 }
 
 // Hub maintains the state of rooms and active peer connections.
@@ -318,6 +319,7 @@ func (h *Hub) RouteMessage(senderID string, msg *Message) error {
 		From:      senderID,
 		SDP:       msg.SDP,
 		Candidate: msg.Candidate,
+		Key:       msg.Key,
 	}
 
 	data, err := json.Marshal(forwardMsg)
@@ -422,22 +424,34 @@ func (h *Hub) HandleRelayRequest(senderID string, msg *Message) {
 		return
 	}
 
-	// Notify both peers of approval with the token
-	approved := Message{
+	// Notify both peers of approval with the token.
+	// The host's ephemeral ECDH public key (if provided) is forwarded to the
+	// guest so it can complete the key exchange without an extra round-trip.
+	hostApproved := Message{
 		Type:  "relay-approved",
 		Room:  room.Code,
 		Token: token,
 		To:    recipient.ID,
 		From:  sender.ID,
 	}
-	data, _ := json.Marshal(approved)
+	guestApproved := Message{
+		Type:  "relay-approved",
+		Room:  room.Code,
+		Token: token,
+		To:    recipient.ID,
+		From:  sender.ID,
+		Key:   msg.Key, // host's ECDH public key for the guest to derive the shared secret
+	}
+
+	hostData, _ := json.Marshal(hostApproved)
+	guestData, _ := json.Marshal(guestApproved)
 
 	select {
-	case sender.Send <- data:
+	case sender.Send <- hostData:
 	default:
 	}
 	select {
-	case recipient.Send <- data:
+	case recipient.Send <- guestData:
 	default:
 	}
 }
