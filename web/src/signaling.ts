@@ -12,6 +12,8 @@ export interface JoinMessage {
 export interface RelayRequestMessage {
   type: "relay-request";
   to: string;
+  // Login session token; the server only brokers the relay when this is valid.
+  auth?: string;
 }
 
 export interface OfferMessage {
@@ -307,8 +309,8 @@ export class SignalingClient {
    * Ask the server to set up an authenticated data relay session with a peer
    * (SPEC §4.3). Only valid for the host. The server replies with relay-approved.
    */
-  public sendRelayRequest(to: string): void {
-    this.send({ type: "relay-request", to });
+  public sendRelayRequest(to: string, auth?: string): void {
+    this.send({ type: "relay-request", to, auth });
   }
 
   /**

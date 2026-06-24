@@ -29,6 +29,12 @@ export interface TransportEvents {
   onReceiveComplete?: (meta: FileMetadata, blob: Blob) => void;
   /** The active transport path changed (for the status badge), e.g. "Server relay (NAT)". */
   onActivePath?: (label: string) => void;
+  /**
+   * The Go data relay is about to be used and a login is required. The consumer
+   * should obtain a relay session token (e.g. prompt for the shared password)
+   * and resolve once authenticated, or reject to abort the transfer.
+   */
+  onAuthRequired?: () => Promise<void>;
   /** A transport-level error (signaling/connection). */
   onError?: (reason: string) => void;
 }

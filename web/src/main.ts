@@ -1,6 +1,7 @@
 import { ConnectionOrchestrator } from "./orchestrator.js";
 import type { PeerState } from "./transport.js";
 import { triggerDownload } from "./transfer.js";
+import { login as relayLogin } from "./auth.js";
 import QRCode from "qrcode";
 import { Html5Qrcode } from "html5-qrcode";
 
@@ -51,6 +52,12 @@ const qrModalCode = document.getElementById("qr-modal-code")!;
 const closeQrBtn = document.getElementById("close-qr-btn") as HTMLButtonElement;
 const closeScannerBtn = document.getElementById("close-scanner-btn") as HTMLButtonElement;
 const scannerError = document.getElementById("scanner-error")!;
+
+const loginModal = document.getElementById("login-modal")!;
+const loginPasswordInput = document.getElementById("login-password-input") as HTMLInputElement;
+const loginError = document.getElementById("login-error")!;
+const loginSubmitBtn = document.getElementById("login-submit-btn") as HTMLButtonElement;
+const loginCancelBtn = document.getElementById("login-cancel-btn") as HTMLButtonElement;
 
 // State variables
 let role: "host" | "guest" | null = null;
@@ -257,6 +264,12 @@ function resetToLobby(): void {
   // Close any active modals and stop scanner
   qrModal.classList.remove("active");
   scannerModal.classList.remove("active");
+  if (loginPending) {
+    const pending = loginPending;
+    loginPending = null;
+    pending.reject(new Error("login cancelled"));
+  }
+  loginModal.classList.remove("active");
   stopScanner();
 
   lobbySection.classList.add("active");
@@ -482,6 +495,62 @@ orchestrator.onReceiveComplete = (metadata, blob) => {
 orchestrator.onPathLabel = (label) => {
   statusText.textContent = label;
 };
+
+// Relay login: shown lazily when a transfer must fall back to the Go data relay.
+let loginPending: { resolve: () => void; reject: (err: Error) => void } | null = null;
+
+function closeLoginModal(): void {
+  loginModal.classList.remove("active");
+  loginPasswordInput.value = "";
+  loginError.style.display = "none";
+  loginSubmitBtn.disabled = false;
+}
+
+function promptRelayLogin(): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    loginPending = { resolve, reject };
+    loginError.style.display = "none";
+    loginPasswordInput.value = "";
+    loginModal.classList.add("active");
+    loginPasswordInput.focus();
+  });
+}
+
+async function submitLogin(): Promise<void> {
+  if (!loginPending) return;
+  const password = loginPasswordInput.value.trim();
+  if (!password) {
+    loginError.textContent = "Please enter the password.";
+    loginError.style.display = "block";
+    return;
+  }
+  loginSubmitBtn.disabled = true;
+  loginError.style.display = "none";
+  try {
+    await relayLogin(password);
+    const pending = loginPending;
+    loginPending = null;
+    closeLoginModal();
+    pending?.resolve();
+  } catch (err) {
+    loginSubmitBtn.disabled = false;
+    loginError.textContent = err instanceof Error ? err.message : "Login failed.";
+    loginError.style.display = "block";
+  }
+}
+
+loginSubmitBtn.addEventListener("click", () => void submitLogin());
+loginPasswordInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") void submitLogin();
+});
+loginCancelBtn.addEventListener("click", () => {
+  const pending = loginPending;
+  loginPending = null;
+  closeLoginModal();
+  pending?.reject(new Error("login cancelled"));
+});
+
+orchestrator.onAuthRequired = promptRelayLogin;
 
 orchestrator.onError = (reason) => {
   showError(reason);

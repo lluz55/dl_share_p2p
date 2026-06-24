@@ -8,7 +8,11 @@ import { SignalingClient } from "./signaling.js";
 import { PeerConnectionManager } from "./peer.js";
 import { sendFile as sendFileDirect, FileReceiver, FileMetadata } from "./transfer.js";
 import { connectRelay, sendFileOverRelay } from "./relay-transfer.js";
+import * as auth from "./auth.js";
 import type { Transport, TransportEvents, TransportRole } from "./transport.js";
+
+// Server reason returned when a relay is requested without a valid login.
+const LOGIN_REQUIRED = "login-required";
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -50,7 +54,16 @@ export class GoTransport implements Transport {
       this.events.onPeerState?.(peerId, "closed");
     };
     this.signaling.onRelayApproved = (token, from, to) => this.handleRelayApproved(token, from, to);
-    this.signaling.onError = (reason) => this.events.onError?.(reason);
+    this.signaling.onError = (reason) => {
+      if (reason === LOGIN_REQUIRED) {
+        // The session token was missing/expired when we asked for a relay. Drop
+        // it and unblock the pending request so sendFile can re-authenticate.
+        auth.clear();
+        this.rejectPendingRelays(new Error(LOGIN_REQUIRED));
+        return;
+      }
+      this.events.onError?.(reason);
+    };
 
     this.peers.onConnectionStateChange = (peerId, state) => this.handlePeerState(peerId, state);
     this.peers.onDataChannel = (peerId, channel) => this.handleDataChannel(peerId, channel);
@@ -74,9 +87,10 @@ export class GoTransport implements Transport {
       return;
     }
 
-    // Direct path unavailable → authenticated Go data relay (SPEC §4.3).
+    // Direct path unavailable → authenticated Go data relay (SPEC §4.3). Using
+    // the server for file data requires a prior login (shared password).
     this.events.onActivePath?.("Server relay (NAT)");
-    const token = await this.requestRelay(peerId);
+    const token = await this.requestRelayAuthenticated(peerId);
     const ws = await connectRelay(token, this.requireSelfId());
     try {
       // Give the guest a moment to attach to the relay before streaming.
@@ -176,10 +190,40 @@ export class GoTransport implements Transport {
     };
   }
 
+  // Obtain a relay token, ensuring we are logged in first and retrying once if
+  // the server reports the session expired between login and the request.
+  private async requestRelayAuthenticated(peerId: string): Promise<string> {
+    await this.ensureAuth();
+    try {
+      return await this.requestRelay(peerId);
+    } catch (err) {
+      if (err instanceof Error && err.message === LOGIN_REQUIRED) {
+        auth.clear();
+        await this.ensureAuth();
+        return await this.requestRelay(peerId);
+      }
+      throw err;
+    }
+  }
+
+  // Ensure a valid relay session token exists, prompting the consumer to log in
+  // (shared password) if needed. Throws if authentication is unavailable.
+  private async ensureAuth(): Promise<void> {
+    if (auth.hasValidToken()) {
+      return;
+    }
+    if (this.events.onAuthRequired) {
+      await this.events.onAuthRequired();
+    }
+    if (!auth.hasValidToken()) {
+      throw new Error("login required to use the server relay");
+    }
+  }
+
   private requestRelay(peerId: string): Promise<string> {
     return new Promise<string>((resolve, reject) => {
       this.pendingRelay.set(peerId, { resolve, reject });
-      this.signaling.sendRelayRequest(peerId);
+      this.signaling.sendRelayRequest(peerId, auth.getToken() ?? undefined);
       setTimeout(() => {
         if (this.pendingRelay.has(peerId)) {
           this.pendingRelay.delete(peerId);
@@ -187,6 +231,13 @@ export class GoTransport implements Transport {
         }
       }, 10000);
     });
+  }
+
+  private rejectPendingRelays(err: Error): void {
+    for (const pending of this.pendingRelay.values()) {
+      pending.reject(err);
+    }
+    this.pendingRelay.clear();
   }
 
   private requireSelfId(): string {

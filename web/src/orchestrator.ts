@@ -29,6 +29,9 @@ export class ConnectionOrchestrator {
   public onReceiveProgress?: (receivedBytes: number, totalBytes: number, meta: FileMetadata) => void;
   public onReceiveComplete?: (meta: FileMetadata, blob: Blob) => void;
   public onPathLabel?: (label: string) => void;
+  // Invoked when the Go data relay needs a login; should resolve once
+  // authenticated (e.g. after prompting for the shared password).
+  public onAuthRequired?: () => Promise<void>;
   public onError?: (reason: string) => void;
 
   private role: TransportRole = "guest";
@@ -134,6 +137,7 @@ export class ConnectionOrchestrator {
     };
     this.wireTransfer(g);
     g.events.onActivePath = (label) => this.onPathLabel?.(label);
+    g.events.onAuthRequired = () => this.handleAuthRequired();
     g.events.onError = (reason) => {
       // For the host, Go is only a standby fallback listener; a server/tunnel
       // outage must not surface as an error while the serverless path works.
@@ -152,6 +156,13 @@ export class ConnectionOrchestrator {
     t.events.onReceiveProgress = (received, total, meta) =>
       this.onReceiveProgress?.(received, total, meta);
     t.events.onReceiveComplete = (meta, blob) => this.onReceiveComplete?.(meta, blob);
+  }
+
+  private async handleAuthRequired(): Promise<void> {
+    if (!this.onAuthRequired) {
+      throw new Error("login required but no login handler is configured");
+    }
+    await this.onAuthRequired();
   }
 
   private fallbackGuestToGo(): void {
