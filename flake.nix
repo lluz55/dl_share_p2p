@@ -117,6 +117,35 @@
             echo "Starting Cloudflare Tunnel persistent instance..."
             exec ${pkgs.cloudflared}/bin/cloudflared tunnel run --token "$TOKEN"
           '';
+
+          dev-run = pkgs.writeShellScriptBin "p2pshare-dev-run" ''
+            set -uo pipefail
+
+            SERVER_PID=""
+            TUNNEL_PID=""
+
+            _stop() {
+              echo ""
+              echo "==> Stopping all services..."
+              [ -n "$SERVER_PID" ] && kill "$SERVER_PID" 2>/dev/null || true
+              [ -n "$TUNNEL_PID" ] && kill "$TUNNEL_PID" 2>/dev/null || true
+              wait 2>/dev/null || true
+            }
+            trap _stop EXIT INT TERM
+
+            echo "==> Starting Go server..."
+            ${server-run}/bin/p2pshare-server-run "$@" &
+            SERVER_PID=$!
+
+            echo "==> Starting Cloudflare tunnel..."
+            ${tunnel-run}/bin/p2pshare-tunnel-run &
+            TUNNEL_PID=$!
+
+            echo "==> Running (server PID=$SERVER_PID, tunnel PID=$TUNNEL_PID) — Ctrl+C to stop."
+
+            # Exit as soon as either service dies
+            wait -n "$SERVER_PID" "$TUNNEL_PID"
+          '';
         };
 
         devShells.default = pkgs.mkShell {
