@@ -171,6 +171,13 @@ export class ConnectionOrchestrator {
     }
     this.clearGuestTimer();
     this.onPathLabel?.("Server signaling (fallback)…");
+    // Close any Trystero-managed peers so consumers (e.g. activeGuests in the
+    // UI) don't hold stale "connected" entries while Go re-pairs.
+    for (const [peerId, transport] of this.peerTransport) {
+      if (transport === this.trystero) {
+        this.onPeerState?.(peerId, "closed");
+      }
+    }
     this.trystero?.leave();
     this.trystero = null;
     this.peerTransport.clear();

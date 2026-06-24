@@ -40,6 +40,7 @@ const progressBarFill = document.getElementById("progress-bar-fill")!;
 const progressPercent = document.getElementById("progress-percent")!;
 const progressBytes = document.getElementById("progress-bytes")!;
 
+const infoBanner = document.getElementById("info-banner")!;
 const peersSection = document.getElementById("peers-section")!;
 const peersList = document.getElementById("peers-list")!;
 
@@ -146,7 +147,7 @@ function renderPeersList(): void {
 
     const nameSpan = document.createElement("span");
     nameSpan.className = "peer-id";
-    nameSpan.textContent = `Guest (${peerId.substring(0, 6)})`;
+    nameSpan.textContent = `Peer (${peerId.substring(0, 6)})`;
 
     const statusSpan = document.createElement("span");
     statusSpan.className = "peer-status";
@@ -275,6 +276,7 @@ function resetToLobby(): void {
   lobbySection.classList.add("active");
   roomSection.classList.remove("active");
   progressContainer.style.display = "none";
+  infoBanner.style.display = "none";
   senderFlow.style.display = "none";
   receiverFlow.style.display = "none";
   peersSection.style.display = "none";
@@ -357,17 +359,17 @@ fileInput.addEventListener("change", () => {
 
 // Send File Action (1-to-n parallel execution)
 sendFileBtn.addEventListener("click", () => {
-  if (role !== "host" || !currentFile) return;
+  if (!currentFile) return;
 
-  const connectedGuests = Array.from(activeGuests.entries()).filter(
+  const connectedPeers = Array.from(activeGuests.entries()).filter(
     ([_, info]) => info.state === "connected"
   );
 
-  if (connectedGuests.length === 0) return;
+  if (connectedPeers.length === 0) return;
 
   sendFileBtn.disabled = true;
 
-  const transferPromises = connectedGuests.map(([peerId, info]) => {
+  const transferPromises = connectedPeers.map(([peerId, info]) => {
     info.bytesSent = 0;
     info.totalBytes = currentFile!.size;
     info.complete = false;
@@ -468,6 +470,7 @@ orchestrator.onReceiveComplete = (metadata, blob) => {
 
 orchestrator.onPathLabel = (label) => {
   statusText.textContent = label;
+  infoBanner.style.display = label === "Server relay (NAT)" ? "block" : "none";
 };
 
 // Relay login: shown lazily when a transfer must fall back to the Go data relay.

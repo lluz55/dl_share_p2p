@@ -363,6 +363,19 @@
       text-align: center;
     }
 
+    .info-banner {
+      background: rgba(59, 130, 246, 0.08);
+      border: 1px solid rgba(59, 130, 246, 0.2);
+      color: #93c5fd;
+      border-radius: 12px;
+      padding: 12px 16px;
+      font-size: 0.85rem;
+      margin-bottom: 16px;
+      display: none;
+      text-align: center;
+      line-height: 1.5;
+    }
+
     .waiting-placeholder {
       text-align: center;
       padding: 30px;
@@ -591,6 +604,11 @@
           <div class="status-indicator"></div>
           <span id="status-text">Waiting for peers...</span>
         </div>
+      </div>
+
+      <!-- Relay info banner (shown when file data must pass through the Go server) -->
+      <div id="info-banner" class="info-banner">
+        Direct connection unavailable &mdash; file data is relayed through the server (end-to-end encrypted).
       </div>
 
       <!-- Peers List (1-to-n) -->
